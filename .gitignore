@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Data and databases (downloaded or generated, not source code)
+data/
+*.db
+*.sqlite
+
+# Secrets
+.env
+
+# Private working notes
+notes/
+
+# Editor / OS
+.vscode/
+Thumbs.db
+.DS_Store
