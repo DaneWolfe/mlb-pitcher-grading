@@ -1,4 +1,4 @@
-# Pitchlab
+# MLB Pitcher Forecast
 
 Forecasts and ranks MLB pitchers for the coming season from raw pitch-tracking data: pitch type,
 velocity, spin rate, and vertical and horizontal break, plus each pitcher's results. The model
