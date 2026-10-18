@@ -1,5 +1,6 @@
-from datetime import date
-from pitchlab.config import KEEP_COLUMNS
+from datetime import date, timedelta
+from pathlib import Path
+from pitchlab.config import KEEP_COLUMNS, DATA_DIR
 import io
 import pandas as pd
 import requests
@@ -14,3 +15,20 @@ def fetch_day(day: date) -> pd.DataFrame:
     response.raise_for_status()
     # usecols drops the ~100 other Savant columns at parse time, so they never enter memory
     return pd.read_csv(io.StringIO(response.text), usecols = KEEP_COLUMNS)
+
+def download_range(start: date, end: date, raw_dir: Path = DATA_DIR / "raw") -> list[Path]:
+    raw_dir.mkdir(parents = True, exist_ok = True)
+    paths = []
+
+    day = start
+    # day < today: A file saved while games are still being played would be incomplete, and the
+    # exists() check below would then never replace it
+    while day <= end and day < date.today():
+        path = raw_dir / f"savant_{day.isoformat()}.parquet"
+        # An existing file means the day is done. Off-days are saved too (0 rows), so they aren't re-requested
+        if not path.exists():
+            fetch_day(day).to_parquet(path, index = False)
+        # Appended whether downloaded now or already on disk: the list is every file for the range
+        paths.append(path)
+        day = day + timedelta(days = 1)
+    return paths
