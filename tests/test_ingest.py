@@ -10,6 +10,7 @@ def test_build_url_contains_date_and_season():
     assert "hfSea=2026" in url
 
 class FakeResponse:
+    # Stand-in for requests.Response; the extra "zone" column should be filtered out by fetch_day
     text = (
         ",".join(KEEP_COLUMNS) + ",zone\n"
         "FF,2026-09-01,95.1,Doe John,123456,R,R,-0.8,1.3,2300,1,1,1,0.02,5\n"
@@ -22,6 +23,7 @@ def test_fetch_day_keeps_only_wanted_columns(monkeypatch):
     def fake_get(url, timeout):
         return FakeResponse()
 
+    # Replace requests.get so the test never hits the network
     monkeypatch.setattr(requests, "get", fake_get)
     df = fetch_day(date(2026, 9, 1))
     assert len(df) == 2
