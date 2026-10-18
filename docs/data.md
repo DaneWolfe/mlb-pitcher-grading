@@ -42,6 +42,53 @@ Open items:
 | `bb_type`           | text        | Batted-ball type on balls in play: ground_ball, fly_ball, line_drive, popup |
 | `delta_pitcher_run_exp` | runs    | Change in expected runs from this pitch, pitcher's perspective (below) |
 
+The file also has location columns (`plate_x`, `plate_z`, `zone`, `sz_top`, `sz_bot`) and the
+count (`balls`, `strikes`). They are deliberately not kept: whether a pitch off the plate was a
+purposeful ball or a miss cannot be told from the data, and the scores are meant to describe the
+pitches themselves.
+
+## Pitch types
+
+Kept (`PITCH_TYPES`), each as its own category, never grouped into families:
+
+| Code | Pitch            |   | Code | Pitch         |
+|------|------------------|---|------|---------------|
+| `FF` | Four-seam        |   | `CU` | Curveball     |
+| `SI` | Sinker           |   | `KC` | Knuckle curve |
+| `FC` | Cutter           |   | `CH` | Changeup      |
+| `SL` | Slider           |   | `FS` | Splitter      |
+| `ST` | Sweeper          |   | `FO` | Forkball      |
+| `SV` | Slurve           |   |      |               |
+
+- Relabeled: `CS` (slow curve) becomes `CU`. The relabel happens before filtering.
+- Dropped: `KN` (knuckleball), `EP` (eephus), `SC` (screwball), `PO` (pitchout), `FA` (other),
+  and any other code not listed above, such as intentional or automatic balls.
+- `SV` and `FO` are rare (2 to 39 and 0 to 5 pitches per sampled day), so they contribute few rows.
+
+Sample days (one June day per season, all regular-season pitches):
+
+| Day        | Pitches | `ST` (sweeper)  | `SV` | `FS` | `FO` | `CS` | Dropped codes seen   |
+|------------|---------|-----------------|------|------|------|------|----------------------|
+| 2019-06-15 | 4,399   | 20 (0.5%)       | 2    | 108  | 0    | 1    | `PO`                 |
+| 2022-06-15 | 4,419   | 136 (3.1%)      | 39   | 21   | 0    | 0    | `EP`, `FA`, `KN`     |
+| 2023-06-15 | 3,120   | 206 (6.6%)      | 24   | 106  | 5    | 0    | `SC`, `PO`           |
+
+The sweeper share rose sharply. Part of that is real (the pitch became popular), but older seasons
+may still label some sweepers `SL`; one day per season cannot separate the two. The `ST` share per
+season should be checked once full seasons are downloaded.
+
+Changeups and splitters on the same days (horizontal break mirrored to arm side):
+
+| Day        | Type | Pitches | Speed (mph) | Spin (rpm) | Vertical break (in) | Arm-side break (in) |
+|------------|------|---------|-------------|------------|---------------------|---------------------|
+| 2019-06-15 | `CH` | 508     | 85.1        | 1,709      | 7.1                 | 13.7                |
+| 2019-06-15 | `FS` | 108     | 85.3        | 1,400      | 3.6                 | 10.6                |
+| 2023-06-15 | `CH` | 249     | 85.6        | 1,763      | 6.5                 | 12.9                |
+| 2023-06-15 | `FS` | 106     | 87.2        | 1,459      | 3.7                 | 12.3                |
+
+Splitters averaged about 300 rpm less spin and half the vertical break, so the measurements
+usually separate the two even without the label; the pitch-type input covers the cases that overlap.
+
 ### Horizontal movement sign
 
 Four-seam fastballs averaged -0.65 ft for right-handed pitchers and +0.70 ft for left-handed
@@ -78,16 +125,19 @@ One June game day per season was sampled; values are the share of rows that have
 | 2021   | 2,932         | 100%      | 100%     | 100%      |
 
 - Spin rate is mostly complete from 2017, the first season used.
-- 2020 was a 60-game season; season pairs involving 2020 are excluded.
+- 2020 was a 60-game season and is excluded.
 - Whether measurements are comparable across tracking-system changes has not been checked.
 
-## Qualifying pitchers
+## Cutoffs
 
-Two cutoffs, both counted in regular-season pitches (innings are not a column in the pitch file):
+Counted in regular-season pitches (innings are not a column in the pitch file):
 
-- **Input season N: at least 1,850 pitches** (about 115 innings). Keeps relievers out.
-- **Forecast season N+1: at least 500 pitches** (about 30 innings). Enough for a run-value rate
-  to mean something. A pitcher with no such season has no label and is dropped.
+- **Model rows: at least 30 pitches** of a pitch type in a season. Every pitcher counts,
+  relievers included. Rows are weighted by pitch count, so small rows have little influence.
+- **Rankings: at least 1,850 pitches** in the season (about 115 innings). Keeps relievers out of
+  the starter rankings.
+
+## Starters (ranking cutoff)
 
 Counts come from MLB Stats API season totals, which include `numberOfPitches`, `gamesStarted`,
 `gamesPlayed` and `outs` per pitcher (seasons 2017-2019 and 2021-2026):
@@ -122,8 +172,9 @@ Qualifiers at 1,850 pitches:
 | 2025   | 113 |
 | 2026   | 121 |
 
-Training pairs (qualifier in N, pitcher in N+1) across the seven usable season pairs
-(2017-18, 2018-19, 2021-22, 2022-23, 2023-24, 2024-25, 2025-26):
+Season pairs (a starter in season N, the same pitcher in N+1), used only by the stability and
+next-season checks, across the seven usable pairs (2017-18, 2018-19, 2021-22, 2022-23, 2023-24,
+2024-25, 2025-26):
 
 | Requirement in N+1      | Pairs |
 |-------------------------|-------|
@@ -131,26 +182,7 @@ Training pairs (qualifier in N, pitcher in N+1) across the seven usable season p
 | >= 1,000 pitches        | 637   |
 | >= 500 pitches          | 703   |
 
-108 of 811 qualifiers (13%) threw fewer than 500 pitches the next season, or none, and are
-dropped. Pairs per test season are about 95 to 115.
-
 Pitch counts per pitcher-season can be cross-checked against `numberOfPitches` from this API.
-
-## Player birth dates (for age)
-
-The pitch file has no birth dates. The MLB Stats API returns `birthDate` (and `pitchHand`) per
-player id, with several ids per request:
-
-```
-https://statsapi.mlb.com/api/v1/people?personIds=694819,592332,663903
-```
-
-Player ids are the same MLB ids as the `pitcher` column. The responses carry a copyright notice
-pointing to terms of use, which should be read before heavy use. Only qualifying pitchers need to
-be fetched, and results are cached locally. Age is computed as of June 30 of the season.
-
-Alternative: the Chadwick Bureau register (`people-*.csv` on GitHub) has `key_mlbam` and
-`birth_year/month/day`. The layout was verified; coverage of the newest players was not.
 
 ## Cross-check sources
 
@@ -171,9 +203,10 @@ https://baseballsavant.mlb.com/leaderboard/pitch-arsenal-stats
   ?type=pitcher&pitchType=&year=2026&team=&min=100&csv=true
 ```
 
-Its sign convention has not yet been compared with sums of `delta_pitcher_run_exp`; check this
-before relying on it. Its pitch counts run well below season totals, so it cannot be used to
-count qualifiers.
+Its per-pitch-type rows match this project's unit, so it is the main spot-check for the
+`pitch_seasons` table. Its sign convention has not yet been compared with sums of
+`delta_pitcher_run_exp`; check this before relying on it. Its pitch counts run well below season
+totals, so it cannot be used to count qualifiers.
 
 ## Storage
 

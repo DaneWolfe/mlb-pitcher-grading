@@ -1,54 +1,72 @@
-# MLB Pitcher Forecast
+# MLB Pitcher Grading
 
-Forecasts and ranks MLB pitchers for the coming season from raw pitch-tracking data: pitch type,
-velocity, spin rate, and vertical and horizontal break, plus each pitcher's results. The model
-learns from past seasons how one season's profile predicts the next; no premade pitch grades such
-as Stuff+ are used.
+Scores MLB pitchers by their pitches alone: pitch type, velocity, spin rate, and vertical and
+horizontal break. A model learns from past seasons what pitches with these traits are worth, then
+grades each pitcher's arsenal. No premade pitch grades such as Stuff+ are used, and pitch location
+is deliberately left out.
 
-Example backtest: predict the 2025 season from 2024 data, then compare with what actually happened
-(including who received Cy Young votes).
+Example: rank the 2025 starters by what their arsenals were worth, then compare with what they
+actually allowed.
 
-Scope: starters (at least 1,850 pitches, about 115 innings, in the input season). The ranking assumes a healthy season;
-injuries and trades are not modeled.
+Scope: every pitcher's pitches train the model; rankings cover starters (at least 1,850 pitches,
+about 115 innings, in the season).
 
 ## How it works
 
-**One row per pitcher-season.** Every pitch a pitcher threw in a season is boiled down to a single
-row: age, workload, results, and, separately for fastballs, breaking balls and offspeed pitches,
-how often each was thrown and its average velocity, spin rate, and vertical and horizontal break.
+**One row per pitch type, per pitcher, per season.** Every pitch type a pitcher threw at least 30
+times in a season becomes a row: its average velocity, spin rate, vertical break and horizontal
+break, the pitch type itself, and the pitcher's throwing hand. Pitch types are never grouped into
+families, so a splitter and a changeup are different inputs. A pitcher with five pitches has five
+rows; one with three has three.
 
 **Results are measured in run value.** Each pitch is credited with how much it changed the
-expected number of runs, from the pitcher's side. Every kind of out counts in the pitcher's favor,
-not only strikeouts, and walks and home runs count against him. A pitcher's season is judged by his run value
-per 100 pitches.
+expected number of runs, from the pitcher's side. A row's label is that pitch's run value per 100
+pitches over the whole season, so chases, deliberate balls, misses and hard contact all count. A
+single pitch is too noisy to judge; a season of them is not.
 
-**The model learns from pairs of seasons.** Each training example joins one season's row to the
-same pitcher's run value per 100 pitches the following year. From a few hundred such pairs, a
-scikit-learn regression model learns which parts of a profile carry over to next season. Applied to the
-latest season, it predicts every qualifying pitcher's next season and ranks them.
+**The model learns what pitch traits are worth.** A scikit-learn regression model learns how type,
+speed, spin and movement relate to run value. Its prediction for a row is that pitch's stuff value:
+what a pitch with those traits is worth on average, independent of location, count or luck.
 
-**Backtests check it against the past.** To forecast a past season, the model is trained only on
-seasons before it, then compared with what happened. Every result is shown next to the naive
-forecast "next season equals this season"; if the model cannot beat that, the results will say so.
+**Pitchers are ranked by their arsenals.** The main score is cumulative: each pitch's predicted
+value per 100 pitches times how many he threw, summed over his arsenal. It rewards both quality and
+workload. A rate score (stuff value per 100 pitches) is shown next to it, along with the gap between
+actual and predicted run value ("results beat or lagged his stuff").
+
+**Checks.** Each season is scored by a model trained without that season. Scores are compared with
+actual results, tested for stability from one season to the next (against the stability of results
+themselves), and tested for whether they predict the following season better than that season's
+results do.
 
 The system around the model (download, SQLite storage, a read-only FastAPI service, and a
 frontend) is described in [docs/architecture.md](docs/architecture.md).
 
+## Limitations
+
+- Location, count, batter, sequencing and defense are not inputs. They still affect each pitch's
+  actual run value, so they appear in the gap between actual and predicted value, not in the score.
+- Arsenal depth (how many pitches a pitcher can use) is not measured directly; an extra pitch adds
+  to the cumulative score only if it is good on its own.
+- The cumulative score rewards workload, so a pitcher who missed time ranks lower even with elite
+  stuff; the rate score shows that case.
+- Pitch types are Savant's classifications, which have changed over the years (see
+  [docs/data.md](docs/data.md)).
+
 ## Status
 
-Planning complete; Phase 1 (data download, cleaning, storage) is next.
+Planning complete; Phase 1 (data download, cleaning, storage) is in progress.
 
 | Phase | Scope                                          | State       |
 |-------|------------------------------------------------|-------------|
-| 1     | Data: download, clean, store                   | In Progress |
-| 2     | Forecast model and backtests                   | Not started |
-| 3     | Backend: FastAPI over the stored forecasts     | Not started |
-| 4     | Tests, CI, frontend, deployment                | Not started |
+| 1     | Data: download, clean, store, CI               | In Progress |
+| 2     | Pitch model, pitcher scores, evaluation        | Not started |
+| 3     | Backend: FastAPI over the stored scores        | Not started |
+| 4     | Frontend, deployment                           | Not started |
 
 ## Documentation
 
-- [Architecture](docs/architecture.md): components, forecasting model, hosting
-- [Data](docs/data.md): data source, columns, units, season coverage, known quirks
+- [Architecture](docs/architecture.md): components, pitch model, hosting
+- [Data](docs/data.md): data source, columns, units, pitch types, season coverage, known quirks
 
 ## Setup
 
