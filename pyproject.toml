@@ -1,6 +1,7 @@
 [project]
 name = "pitchlab"
 version = "0.1.0"
+license = "MIT"
 requires-python = ">=3.13"
 dependencies = ["pandas", "pyarrow", "requests", "scikit-learn"]
 
@@ -9,7 +10,7 @@ dev = ["pytest"]
 api = ["fastapi", "uvicorn"]
 
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]

@@ -72,6 +72,10 @@ Planning complete; Phase 1 (data download, cleaning, storage) is in progress.
 
 Setup and usage instructions will be added with the first working pipeline.
 
+## License
+
+The code is released under the [MIT License](LICENSE). The data is not covered by it; see below.
+
 ## Data and attribution
 
 Data comes from [Baseball Savant](https://baseballsavant.mlb.com/). This project is not
