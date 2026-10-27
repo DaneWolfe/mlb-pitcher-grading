@@ -5,6 +5,9 @@ import io
 import pandas as pd
 import requests
 import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 def build_url(day: date) -> str:
     # hfGT=R%7C = regular season games only ("R|", URL-encoded); gt/lt with the same date = a single day
@@ -23,10 +26,12 @@ def fetch_day_with_retry(day: date) -> pd.DataFrame:
             return fetch_day(day)
         # RequestException covers timeouts, dropped connections and the HTTP errors from raise_for_status().
         # Anything else (a wrong column name, say) is a real bug, so it is not caught and crashes right away
-        except requests.RequestException:
+        except requests.RequestException as e:
             # Last try failed: re-raise so the run stops loudly. A re-run skips the days already saved
             if i == MAX_ATTEMPTS:
                 raise
+
+            logger.warning("%s attempt %d failed (%s), retrying", day, i, e)
 
             # Wait longer after each failure: 5 s, then 10 s
             time.sleep(RETRY_WAIT_SECONDS * i)
@@ -45,6 +50,8 @@ def download_range(start: date, end: date, raw_dir: Path = DATA_DIR / "raw") -> 
             fetch_day_with_retry(day).to_parquet(path, index = False)
             # Inside the if on purpose: only a real request needs a pause, so a re-run over cached days stays fast
             time.sleep(REQUEST_DELAY_SECONDS)
+
+            logger.info("Downloaded %s", day)
         # Appended whether downloaded now or already on disk: the list is every file for the range
         paths.append(path)
         day = day + timedelta(days = 1)
