@@ -60,3 +60,11 @@ MIN_STARTER_PITCHES = 1850
 # Seconds to pause after each request to Savant. The full download is about 1,600 requests, and a
 # pause keeps it from hammering their server. 1.1 is a cautious guess, not a measured limit.
 REQUEST_DELAY_SECONDS = 1.1
+
+# Total tries per day, counting the first one. With 1,600 requests a network hiccup is nearly certain,
+# so a failed day is tried again before the whole download gives up.
+MAX_ATTEMPTS = 3
+
+# Base wait in seconds after a failed try. The wait grows with each failure (5 s, then 10 s), which
+# gives a struggling server time to recover instead of being hit again right away.
+RETRY_WAIT_SECONDS = 5

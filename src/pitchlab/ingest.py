@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 from pathlib import Path
-from pitchlab.config import KEEP_COLUMNS, DATA_DIR, REQUEST_DELAY_SECONDS
+from pitchlab.config import KEEP_COLUMNS, DATA_DIR, REQUEST_DELAY_SECONDS, MAX_ATTEMPTS, RETRY_WAIT_SECONDS
 import io
 import pandas as pd
 import requests
@@ -17,6 +17,20 @@ def fetch_day(day: date) -> pd.DataFrame:
     # usecols drops the ~100 other Savant columns at parse time, so they never enter memory
     return pd.read_csv(io.StringIO(response.text), usecols = KEEP_COLUMNS)
 
+def fetch_day_with_retry(day: date) -> pd.DataFrame:
+    for i in range(1, MAX_ATTEMPTS + 1):
+        try:
+            return fetch_day(day)
+        # RequestException covers timeouts, dropped connections and the HTTP errors from raise_for_status().
+        # Anything else (a wrong column name, say) is a real bug, so it is not caught and crashes right away
+        except requests.RequestException:
+            # Last try failed: re-raise so the run stops loudly. A re-run skips the days already saved
+            if i == MAX_ATTEMPTS:
+                raise
+
+            # Wait longer after each failure: 5 s, then 10 s
+            time.sleep(RETRY_WAIT_SECONDS * i)
+
 def download_range(start: date, end: date, raw_dir: Path = DATA_DIR / "raw") -> list[Path]:
     raw_dir.mkdir(parents = True, exist_ok = True)
     paths = []
@@ -28,7 +42,7 @@ def download_range(start: date, end: date, raw_dir: Path = DATA_DIR / "raw") -> 
         path = raw_dir / f"savant_{day.isoformat()}.parquet"
         # An existing file means the day is done. Off-days are saved too (0 rows), so they aren't re-requested
         if not path.exists():
-            fetch_day(day).to_parquet(path, index = False)
+            fetch_day_with_retry(day).to_parquet(path, index = False)
             # Inside the if on purpose: only a real request needs a pause, so a re-run over cached days stays fast
             time.sleep(REQUEST_DELAY_SECONDS)
         # Appended whether downloaded now or already on disk: the list is every file for the range

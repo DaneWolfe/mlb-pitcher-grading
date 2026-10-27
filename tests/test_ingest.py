@@ -1,7 +1,8 @@
 from datetime import date, timedelta
 from pitchlab import ingest
-from pitchlab.ingest import build_url, fetch_day, download_range
-from pitchlab.config import KEEP_COLUMNS, REQUEST_DELAY_SECONDS
+from pitchlab.ingest import build_url, fetch_day, fetch_day_with_retry, download_range
+from pitchlab.config import KEEP_COLUMNS, REQUEST_DELAY_SECONDS, MAX_ATTEMPTS, RETRY_WAIT_SECONDS
+import pytest
 import requests
 import pandas as pd
 import time
@@ -112,3 +113,55 @@ def test_download_range_sleeps_only_after_requests(tmp_path, monkeypatch):
     (tmp_path / "savant_2026-09-01.parquet").touch()
     download_range(date(2026, 9, 1), date(2026, 9, 3), raw_dir = tmp_path)
     assert sleeps == [REQUEST_DELAY_SECONDS, REQUEST_DELAY_SECONDS]
+
+
+# Tests fetch_day_with_retry: a network failure on the first try is retried, and the second try's data is returned
+def test_fetch_day_with_retry_recovers_after_failure(monkeypatch):
+    # Each call records its day, so the length of calls is the number of tries
+    calls = []
+    def fake_fetch_day(day):
+        calls.append(day)
+        if len(calls) == 1:
+            raise requests.ConnectionError()
+        return pd.DataFrame({"game_date": [day.isoformat()]})
+
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+
+    monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
+    df = fetch_day_with_retry(date(2026, 9, 1))
+    assert len(df) == 1
+    assert len(calls) == 2
+    # One failure means one wait, of the base length (attempt 1)
+    assert sleeps == [RETRY_WAIT_SECONDS]
+
+# Tests fetch_day_with_retry: when every try fails it gives up after MAX_ATTEMPTS and raises the error
+def test_fetch_day_with_retry_gives_up_after_max_attempts(monkeypatch):
+    calls = []
+    def fake_fetch_day(day):
+        calls.append(day)
+        raise requests.ConnectionError()
+
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+
+    monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
+    with pytest.raises(requests.ConnectionError):
+        fetch_day_with_retry(date(2026, 9, 1))
+    assert len(calls) == MAX_ATTEMPTS
+    # No wait after the last try, and each earlier wait is longer than the one before
+    assert sleeps == [RETRY_WAIT_SECONDS * i for i in range(1, MAX_ATTEMPTS)]
+
+# Tests fetch_day_with_retry: an error that is not a network problem is a bug, so it is raised at once, not retried
+def test_fetch_day_with_retry_does_not_retry_other_errors(monkeypatch):
+    calls = []
+    def fake_fetch_day(day):
+        calls.append(day)
+        raise ValueError()
+
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
+    monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
+    with pytest.raises(ValueError):
+        fetch_day_with_retry(date(2026, 9, 1))
+    assert len(calls) == 1
