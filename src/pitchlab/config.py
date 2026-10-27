@@ -56,3 +56,7 @@ MIN_PITCH_TYPE_PITCHES = 30
 # Rankings only include starters. 1,850 pitches is about 115 innings, above every non-starter's
 # season total in 2017-2026 (checked in docs/data.md). Relievers still train the model.
 MIN_STARTER_PITCHES = 1850
+
+# Seconds to pause after each request to Savant. The full download is about 1,600 requests, and a
+# pause keeps it from hammering their server. 1.1 is a cautious guess, not a measured limit.
+REQUEST_DELAY_SECONDS = 1.1

@@ -1,9 +1,10 @@
 from datetime import date, timedelta
 from pathlib import Path
-from pitchlab.config import KEEP_COLUMNS, DATA_DIR
+from pitchlab.config import KEEP_COLUMNS, DATA_DIR, REQUEST_DELAY_SECONDS
 import io
 import pandas as pd
 import requests
+import time
 
 def build_url(day: date) -> str:
     # hfGT=R%7C = regular season games only ("R|", URL-encoded); gt/lt with the same date = a single day
@@ -28,6 +29,8 @@ def download_range(start: date, end: date, raw_dir: Path = DATA_DIR / "raw") -> 
         # An existing file means the day is done. Off-days are saved too (0 rows), so they aren't re-requested
         if not path.exists():
             fetch_day(day).to_parquet(path, index = False)
+            # Inside the if on purpose: only a real request needs a pause, so a re-run over cached days stays fast
+            time.sleep(REQUEST_DELAY_SECONDS)
         # Appended whether downloaded now or already on disk: the list is every file for the range
         paths.append(path)
         day = day + timedelta(days = 1)

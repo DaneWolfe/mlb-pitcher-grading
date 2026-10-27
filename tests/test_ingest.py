@@ -1,9 +1,10 @@
 from datetime import date, timedelta
 from pitchlab import ingest
 from pitchlab.ingest import build_url, fetch_day, download_range
-from pitchlab.config import KEEP_COLUMNS
+from pitchlab.config import KEEP_COLUMNS, REQUEST_DELAY_SECONDS
 import requests
 import pandas as pd
+import time
 
 # Tests build_url: the URL asks Savant for exactly one day (same start and end date) in the right season
 def test_build_url_contains_date_and_season():
@@ -40,6 +41,8 @@ def test_download_range_writes_one_file_per_day(tmp_path, monkeypatch):
             "game_date": [day.isoformat()]
         })
 
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
     monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
     paths = download_range(date(2026, 9, 1), date(2026, 9, 5), raw_dir = tmp_path)
     assert len(paths) == 5
@@ -52,6 +55,8 @@ def test_download_range_skips_existing_files(tmp_path, monkeypatch):
     def fake_fetch_day(day):
         calls.append(day)
         return pd.DataFrame({"game_date": [day.isoformat()]})
+
+    monkeypatch.setattr(time, "sleep", lambda s: None)
 
     monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
     download_range(date(2026, 9, 1), date(2026, 9, 3), raw_dir = tmp_path)
@@ -68,6 +73,8 @@ def test_download_range_saves_empty_day(tmp_path, monkeypatch):
     def fake_fetch_day(day):
         return pd.DataFrame(columns = KEEP_COLUMNS)
 
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
     monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
     paths = download_range(date(2026, 9, 1), date(2026, 9, 1), raw_dir = tmp_path)
     assert len(paths) == 1
@@ -81,9 +88,27 @@ def test_download_range_never_fetches_today(tmp_path, monkeypatch):
         calls.append(day)
         return pd.DataFrame({"game_date": [day.isoformat()]})
 
+    monkeypatch.setattr(time, "sleep", lambda s: None)
+
     monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
     # The range starts two days ago and runs two days past today, so only the two days before today are valid
     today = date.today()
     paths = download_range(today - timedelta(days = 2), today + timedelta(days = 2), raw_dir = tmp_path)
     assert today not in calls
     assert len(paths) == 2
+
+
+# Tests download_range: it pauses once after each day it requests, and not at all for days already on disk
+def test_download_range_sleeps_only_after_requests(tmp_path, monkeypatch):
+    def fake_fetch_day(day):
+        return pd.DataFrame({"game_date": [day.isoformat()]})
+
+    # Each sleep call records its argument, so the length of sleeps is the number of pauses
+    sleeps = []
+    monkeypatch.setattr(time, "sleep", lambda s: sleeps.append(s))
+
+    monkeypatch.setattr(ingest, "fetch_day", fake_fetch_day)
+    # Sept 1 is already on disk (an empty file is enough, since the skip check only looks for existence)
+    (tmp_path / "savant_2026-09-01.parquet").touch()
+    download_range(date(2026, 9, 1), date(2026, 9, 3), raw_dir = tmp_path)
+    assert sleeps == [REQUEST_DELAY_SECONDS, REQUEST_DELAY_SECONDS]
