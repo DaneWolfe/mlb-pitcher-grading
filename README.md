@@ -54,12 +54,13 @@ frontend) is described in [docs/architecture.md](docs/architecture.md).
 
 ## Status
 
-Planning complete; Phase 1 (data download, cleaning, storage) is in progress.
+Phase 1 is finished: all nine seasons (2017-2019, 2021-2026) are downloaded, cleaned and stored.
+A few data checks are still open (see [docs/data.md](docs/data.md)). Phase 2 is in progress.
 
 | Phase | Scope                                          | State       |
 |-------|------------------------------------------------|-------------|
-| 1     | Data: download, clean, store, CI               | In Progress |
-| 2     | Pitch model, pitcher scores, evaluation        | Not started |
+| 1     | Data: download, clean, store, CI               | Finished    |
+| 2     | Pitch model, pitcher scores, evaluation        | In progress |
 | 3     | Backend: FastAPI over the stored scores        | Not started |
 | 4     | Frontend, deployment                           | Not started |
 
@@ -70,7 +71,36 @@ Planning complete; Phase 1 (data download, cleaning, storage) is in progress.
 
 ## Setup
 
-Setup and usage instructions will be added with the first working pipeline.
+Requires Python 3.13.
+
+```powershell
+git clone https://github.com/DaneWolfe/mlb-pitcher-grading.git
+cd mlb-pitcher-grading
+python -m venv .venv
+.venv\Scripts\Activate.ps1        # Windows PowerShell; on macOS/Linux: source .venv/bin/activate
+pip install -e ".[dev]"
+pytest
+```
+
+`pip install -e ".[dev]"` installs the project's package, `pitchlab` (the code in `src/pitchlab/`),
+plus pytest for the tests. `requirements.txt` lists the exact package versions of a known working
+setup, if you need to match them.
+
+## Usage
+
+```powershell
+python -m pitchlab.pipeline build              # every season: 2017-2019 and 2021-2026
+python -m pitchlab.pipeline build --year 2025  # one season
+```
+
+For each season, `build` downloads every day from March 15 to October 10 from Baseball Savant
+into `data/raw/` (one file per day), cleans the pitches (see [docs/data.md](docs/data.md)) and
+stores them in `data/pitches.db`, a SQLite database. Days already downloaded are skipped and
+pitches already stored are not added twice, so a stopped run can simply be started again.
+
+The first full build sends about 1,900 requests and pauses 1.1 seconds after each one, so the
+pauses alone take about 35 minutes. Afterward `data/raw/` holds about 105 MB and `pitches.db`
+about 605 MB. Nothing under `data/` is committed.
 
 ## License
 

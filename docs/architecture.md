@@ -20,7 +20,8 @@ pipeline fails.
 
 ### Pipeline
 Python script (`pitchlab.pipeline`) that downloads, cleans, stores, builds features, trains and
-scores. It runs and exits; each step is safe to re-run. It can later be scheduled (GitHub Actions
+scores. It runs and exits; each step is safe to re-run. Built so far: download, clean and store
+(`python -m pitchlab.pipeline build`). Features, training and scoring come in Phase 2. It can later be scheduled (GitHub Actions
 cron or Windows Task Scheduler) to refresh the current season.
 
 ### Storage

@@ -1,9 +1,18 @@
 # Data
 
+What the project downloads, what it keeps, and what the data looks like. Most sections answer a
+question that shaped a design choice. The numbers come from two places, and each section says
+which:
+
+- **Sample days:** a single day's download, looked at during planning, before full seasons
+  existed. They show patterns, not season totals.
+- **Full seasons:** the downloaded 2017-2019 and 2021-2026 seasons (2020 is excluded).
+
 ## Source
 
-Baseball Savant's Statcast Search returns pitch-level CSV from a URL (the same request the
-site's "Download CSV" button makes):
+Statcast is MLB's system that measures every pitch (speed, spin, movement) and every play.
+Baseball Savant is MLB's public site for that data. Its Statcast Search returns pitch-level CSV
+from a URL (the same request the site's "Download CSV" button makes):
 
 ```
 https://baseballsavant.mlb.com/statcast_search/csv
@@ -16,11 +25,16 @@ https://baseballsavant.mlb.com/statcast_search/csv
 Sample request, 2026-09-01: 4,681 rows, 119 columns, about 3.2 MB. Pitch type, speed, spin and
 movement are blank on 11 rows (0.2%). Pitch codes present: FF, SI, CH, SL, ST, CU, FC, FS, KC, EP, SV.
 
-Volume: roughly 180 game days per season, 2-3 MB per day of raw CSV.
+Volume: 179 to 185 game days per season, 2-3 MB per day of raw CSV. Only the kept columns
+(below) are saved, so all nine seasons take about 105 MB as Parquet files.
+
+The pipeline requests one day at a time, pauses 1.1 seconds after each request, and tries a
+failed day up to 3 times with growing waits (settings in `config.py`).
 
 Open items:
 - Row limit per request: 25,000 is suspected; one day is far below it.
-- Rate limits and terms of use have not been reviewed.
+- Rate limits and terms of use have not been reviewed. The 1.1-second pause is a cautious
+  guess, not a known limit.
 
 ## Columns used
 
@@ -42,6 +56,10 @@ Open items:
 | `bb_type`           | text        | Batted-ball type on balls in play: ground_ball, fly_ball, line_drive, popup |
 | `delta_pitcher_run_exp` | runs    | Change in expected runs from this pitch, pitcher's perspective (below) |
 
+The last three text columns (`description`, `events`, `bb_type`) were read from the 2026-09-01
+sample only, to check what run value measures (see "Run value"). The pipeline does not keep them,
+so the saved daily files do not contain them.
+
 The file also has location columns (`plate_x`, `plate_z`, `zone`, `sz_top`, `sz_bot`) and the
 count (`balls`, `strikes`). They are deliberately not kept: whether a pitch off the plate was a
 purposeful ball or a miss cannot be told from the data, and the scores are meant to describe the
@@ -62,10 +80,14 @@ Kept (`PITCH_TYPES`), each as its own category, never grouped into families:
 
 - Relabeled: `CS` (slow curve) becomes `CU`. The relabel happens before filtering.
 - Dropped: `KN` (knuckleball), `EP` (eephus), `SC` (screwball), `PO` (pitchout), `FA` (other),
-  and any other code not listed above, such as intentional or automatic balls.
-- `SV` and `FO` are rare (2 to 39 and 0 to 5 pitches per sampled day), so they contribute few rows.
+  any other code not listed above, such as intentional or automatic balls, and rows with no
+  pitch type at all.
+- `SV` and `FO` are rare (2 to 39 and 0 to 5 pitches per day in the sample-day table below), so
+  they contribute few rows.
 
-Sample days (one June day per season, all regular-season pitches):
+Sample days (one June day per season, all regular-season pitches). Counted from each day's
+downloaded file, to see which codes appear, how rare `SV` and `FO` are, and how the sweeper share
+changes between seasons. One day is a small sample: it shows a pattern, not season totals.
 
 | Day        | Pitches | `ST` (sweeper)  | `SV` | `FS` | `FO` | `CS` | Dropped codes seen   |
 |------------|---------|-----------------|------|------|------|------|----------------------|
@@ -75,9 +97,13 @@ Sample days (one June day per season, all regular-season pitches):
 
 The sweeper share rose sharply. Part of that is real (the pitch became popular), but older seasons
 may still label some sweepers `SL`; one day per season cannot separate the two. The `ST` share per
-season should be checked once full seasons are downloaded.
+season has not been checked on the full seasons yet.
 
-Changeups and splitters on the same days (horizontal break mirrored to arm side):
+Splitters and changeups are kept as separate pitch types. This table checks whether the
+measurements alone tell them apart, or whether the pitch-type label has to. It uses the 2019 and
+2023 days from the table above (2022 had only 21 splitters), and only `CH` and `FS` rows.
+Vertical break is `pfx_z` in inches. Arm-side break is `pfx_x` in inches with left-handers
+flipped so both hands point the same way (see "Horizontal movement sign" below).
 
 | Day        | Type | Pitches | Speed (mph) | Spin (rpm) | Vertical break (in) | Arm-side break (in) |
 |------------|------|---------|-------------|------------|---------------------|---------------------|
@@ -86,13 +112,19 @@ Changeups and splitters on the same days (horizontal break mirrored to arm side)
 | 2023-06-15 | `CH` | 249     | 85.6        | 1,763      | 6.5                 | 12.9                |
 | 2023-06-15 | `FS` | 106     | 87.2        | 1,459      | 3.7                 | 12.3                |
 
-Splitters averaged about 300 rpm less spin and half the vertical break, so the measurements
-usually separate the two even without the label; the pitch-type input covers the cases that overlap.
+What it shows: speed is nearly the same for both (85.1 vs 85.3 mph in 2019, 85.6 vs 87.2 in
+2023) and so is arm-side break in 2023 (12.9 vs 12.3 inches). Spin and vertical break differ
+both days: splitters have about 300 rpm less spin and about half the vertical break (3.6 vs 7.1
+inches in 2019, 3.7 vs 6.5 in 2023). So spin and vertical break usually separate the two, and
+speed and arm-side break do not. Where the measurements overlap, the pitch-type label is what
+separates them, which is why pitch type is a model input. Limits: two days, with 106 to 108
+splitters each, so these are patterns and not season averages.
 
 ### Horizontal movement sign
 
-Four-seam fastballs averaged -0.65 ft for right-handed pitchers and +0.70 ft for left-handed
-pitchers on the sampled day, so one hand must be mirrored before horizontal movement is compared.
+On 2026-09-01 (the sample request in "Source"), four-seam fastballs averaged -0.65 ft for
+right-handed pitchers (991 pitches) and +0.69 ft for left-handed pitchers (540 pitches). The two
+hands have opposite signs, so one hand must be mirrored before horizontal movement is compared.
 
 ### Run value
 
@@ -100,7 +132,10 @@ pitchers on the sampled day, so one hand must be mirrored before horizontal move
 point of view: **positive is good for the pitcher**. `delta_run_exp` is the same quantity from the
 batting side, with the opposite sign. It is blank on the same 11 rows that lack pitch data.
 
-Mean values on the sampled day, pitcher's view:
+Mean run value by outcome, pitcher's view, from the 2026-09-01 sample. The table shows the sign
+and the scale: a home run costs the pitcher almost two runs, an out gains about a quarter run.
+The saved daily files do not keep `description`, `events` or `bb_type`, so these means cannot be
+recomputed from `data/raw`.
 
 | Outcome            | Mean   |   | Batted-ball type (balls in play) | Mean   |
 |--------------------|--------|---|----------------------------------|--------|
@@ -114,7 +149,10 @@ Mean values on the sampled day, pitcher's view:
 
 ## Season coverage
 
-One June game day per season was sampled; values are the share of rows that have the field.
+An early look, before full seasons were downloaded, at whether spin and movement exist in older
+seasons. One June game day per season was sampled; values are the share of rows that have the
+field. 2015 and 2016 are not used and are not in `data/raw`, so those rows cannot be rechecked.
+Full-season numbers for the seasons used are under "Cleaning losses" below.
 
 | Season | Rows that day | Spin rate | Movement | Run value |
 |--------|---------------|-----------|----------|-----------|
@@ -128,6 +166,67 @@ One June game day per season was sampled; values are the share of rows that have
 - 2020 was a 60-game season and is excluded.
 - Whether measurements are comparable across tracking-system changes has not been checked.
 
+## Cleaning losses
+
+How many pitches the cleaning step (`clean_pitches`) removes and why. Removed rows never reach the
+model, so a loss that is concentrated in one kind of pitch would bias it. Counted over full
+seasons, from the daily files before and after cleaning. Every downloaded row is a
+regular-season pitch (`hfGT=R`), and no season has duplicate pitches.
+
+| Season | Downloaded | Kept    | Dropped | Share  | Pitch type blank or dropped | Missing a value |
+|--------|------------|---------|---------|--------|-----------------------------|-----------------|
+| 2017   | 724,627    | 703,150 | 21,477  | 2.96%  | 9,661                       | 11,816          |
+| 2018   | 724,452    | 706,607 | 17,845  | 2.46%  | 7,589                       | 10,256          |
+| 2019   | 735,090    | 714,727 | 20,363  | 2.77%  | 7,938                       | 12,425          |
+| 2021   | 712,320    | 705,774 | 6,546   | 0.92%  | 3,922                       | 2,624           |
+| 2022   | 710,210    | 704,339 | 5,871   | 0.83%  | 3,920                       | 1,951           |
+| 2023   | 720,684    | 711,644 | 9,040   | 1.25%  | 4,996                       | 4,044           |
+| 2024   | 711,899    | 703,463 | 8,436   | 1.18%  | 5,143                       | 3,293           |
+| 2025   | 712,528    | 706,000 | 6,528   | 0.92%  | 4,667                       | 1,861           |
+| 2026   | 716,792    | 710,845 | 5,947   | 0.83%  | 4,864                       | 1,083           |
+
+The 2026-09-01 sample had 0.2% of rows blank (see "Source"), which suggested a similar share
+would be dropped. Every full season is higher.
+
+- The largest part of every season is a blank `pitch_type` (2,054 to 7,329 rows). The rest are
+  the codes dropped on purpose (`EP`, `FA`, `KN`, `PO`, `SC`, `UN`). Why Savant leaves the type
+  blank on those rows has not been checked.
+- Nearly all of "missing a value" is spin rate, not speed, movement or run value.
+
+### Sliders without spin rate, 2017-2019
+
+Before 2021, most of the rows missing spin rate are sliders:
+
+| Season | Sliders | Missing spin | Share |
+|--------|---------|--------------|-------|
+| 2017   | 109,351 | 8,701        | 8.0%  |
+| 2018   | 112,772 | 8,053        | 7.1%  |
+| 2019   | 119,233 | 9,332        | 7.8%  |
+| 2021   | 118,000 | 394          | 0.3%  |
+
+What the data shows:
+
+- It is not a few bad games. No game has all of its sliders missing (one game in 2019), so rows
+  are lost inside games.
+- It is uneven across pitchers. Among pitchers with 30 or more sliders, the median pitcher loses
+  3.3% to 4.6% and the 90th percentile loses 22.5% to 24.7%. In each season 27 to 45 pitchers lose
+  more than a quarter of their sliders. None lose more than half.
+- The 30-pitch cutoff is barely affected: 6 to 9 pitcher-seasons per season drop under 30
+  sliders (for example 446 to 437 in 2017).
+- The lost sliders are not like the kept ones. They are 0.3 to 0.7 mph slower and have about
+  1.0 to 1.6 inches less vertical movement. Run value per pitch is nearly the same (within 0.005).
+  This compares all lost sliders to all kept sliders, not the same pitcher's pitches, so part of
+  the gap may be different pitchers. That has not been separated.
+
+Result: in 2017-2019 a pitcher's slider averages (speed, spin, movement) come only from the
+sliders that had spin, which skew slightly faster and with more vertical movement. Run value for
+the pitch is nearly unaffected. The cause of the missing spin has not been found. 2021 onward is
+clean for sliders. Other pitch types lose a smaller share in 2017-2019 (in 2017, about 2% of
+curveballs and about 5% of splitters); only 2017 was checked by type.
+
+The rows are left as they are. Open check for the model phase: train with and without the
+2017-2019 sliders and see whether slider results move.
+
 ## Cutoffs
 
 Counted in regular-season pitches (innings are not a column in the pitch file):
@@ -138,6 +237,10 @@ Counted in regular-season pitches (innings are not a column in the pitch file):
   the starter rankings.
 
 ## Starters (ranking cutoff)
+
+Rankings cover starters only, and the pitch file has no innings or starts column, so the cutoff
+has to separate starters from relievers by pitch count alone. The tables below check where
+1,850 pitches falls.
 
 Counts come from MLB Stats API season totals, which include `numberOfPitches`, `gamesStarted`,
 `gamesPlayed` and `outs` per pitcher (seasons 2017-2019 and 2021-2026):
@@ -204,13 +307,39 @@ https://baseballsavant.mlb.com/leaderboard/pitch-arsenal-stats
 ```
 
 Its per-pitch-type rows match this project's unit, so it is the main spot-check for the
-`pitch_seasons` table. Its sign convention has not yet been compared with sums of
+`pitch_seasons` table (planned for Phase 2: one row per pitcher, season and pitch type). Its sign convention has not yet been compared with sums of
 `delta_pitcher_run_exp`; check this before relying on it. Its pitch counts run well below season
 totals, so it cannot be used to count qualifiers.
 
 ## Storage
 
-- Raw downloads: one Parquet file per day under `data/raw/` (not committed).
-- Results: a SQLite database under `data/` (not committed).
+- Raw downloads: one Parquet file per day under `data/raw/`, named `savant_YYYY-MM-DD.parquet`.
+  Days with no games are saved as empty files so they are not requested again. Not committed.
+- Database: `data/pitches.db`, SQLite, about 605 MB with all nine seasons. Not committed.
 
-Table definitions are added here as they are implemented.
+More tables are added here as they are implemented.
+
+### `pitches`
+
+One row per cleaned pitch, written by `insert_pitches` in `db.py`. The primary key is
+`(game_pk, at_bat_number, pitch_number)`, so loading the same pitch twice stores it once. Rows
+per season are the "Kept" column under "Cleaning losses".
+
+| Column          | Type    | From Savant column      | Notes                                         |
+|-----------------|---------|-------------------------|-----------------------------------------------|
+| `game_pk`       | INTEGER | `game_pk`               | Game id                                       |
+| `at_bat_number` | INTEGER | `at_bat_number`         | Plate appearance within the game              |
+| `pitch_number`  | INTEGER | `pitch_number`          | Pitch within the plate appearance             |
+| `pitcher_id`    | INTEGER | `pitcher`               | MLB player id                                 |
+| `player_name`   | TEXT    | `player_name`           | "Last, First"                                 |
+| `p_throws`      | TEXT    | `p_throws`              | `L` or `R`                                    |
+| `pitch_type`    | TEXT    | `pitch_type`            | After the `CS` to `CU` relabel                |
+| `velo_mph`      | REAL    | `release_speed`         | mph                                           |
+| `spin_rpm`      | REAL    | `release_spin_rate`     | rpm                                           |
+| `hb_in`         | REAL    | `pfx_x`                 | Inches (feet x 12). Not yet mirrored by hand  |
+| `ivb_in`        | REAL    | `pfx_z`                 | Inches (feet x 12)                            |
+| `run_value`     | REAL    | `delta_pitcher_run_exp` | Positive is good for the pitcher              |
+| `season`        | INTEGER | year of `game_date`     |                                               |
+
+`game_date` and `game_type` are dropped after cleaning: every row is regular season, and the
+date is only needed to get the season.
