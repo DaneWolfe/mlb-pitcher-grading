@@ -24,8 +24,10 @@ expected number of runs, from the pitcher's side. A row's label is that pitch's 
 pitches over the whole season, so chases, deliberate balls, misses and hard contact all count. A
 single pitch is too noisy to judge; a season of them is not.
 
-**The model learns what pitch traits are worth.** A scikit-learn regression model learns how type,
-speed, spin and movement relate to run value. Its prediction for a row is that pitch's stuff value:
+**The model learns what pitch traits are worth.** A small PyTorch neural network learns how type,
+speed, spin and movement relate to run value. It has to beat a simple
+baseline (each pitch type's average run value), and a scikit-learn gradient-boosting model is
+trained alongside it as a reference. Its prediction for a row is that pitch's stuff value:
 what a pitch with those traits is worth on average, independent of location, count or luck.
 
 **Pitchers are ranked by their arsenals.** The main score is cumulative: each pitch's predicted
@@ -55,7 +57,7 @@ frontend) is described in [docs/architecture.md](docs/architecture.md).
 ## Status
 
 Phase 1 is finished: all nine seasons (2017-2019, 2021-2026) are downloaded, cleaned and stored.
-A few data checks are still open (see [docs/data.md](docs/data.md)). Phase 2 is in progress.
+Phase 2 is in progress.
 
 | Phase | Scope                                          | State       |
 |-------|------------------------------------------------|-------------|
@@ -100,7 +102,7 @@ pitches already stored are not added twice, so a stopped run can simply be start
 
 The first full build sends about 1,900 requests and pauses 1.1 seconds after each one, so the
 pauses alone take about 35 minutes. Afterward `data/raw/` holds about 105 MB and `pitches.db`
-about 605 MB. Nothing under `data/` is committed.
+about 605 MB.
 
 ## License
 
