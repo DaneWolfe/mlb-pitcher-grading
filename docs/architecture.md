@@ -58,10 +58,18 @@ The choice is made at the start of Phase 4.
 3. **Label:** the same row's run value per 100 pitches over the season. Season totals average out
    the noise of single pitches; deliberate balls, chases, misses and hard contact all count. Rows
    are weighted by pitch count.
-4. **Model:** scikit-learn. Gradient boosting (`HistGradientBoostingRegressor`) first, because it
-   handles the pitch-type category and interactions such as "spin matters differently for a
-   curveball than a fastball" without hand-built features. Ridge regression with one-hot pitch
-   types is a simple comparison.
+4. **Model:** a small PyTorch neural network.
+   - Inputs: pitch type and hand as learned embeddings (a small trainable vector per category);
+     the four measurements standardized with the training seasons' mean and standard deviation.
+   - Network: two hidden layers of 32 to 64 units. The data is tens of thousands of rows, so a
+     bigger network would memorize the training seasons instead of learning from them.
+   - Training: mean squared error weighted by pitch count, Adam optimizer, mini-batches, and early
+     stopping on a validation split taken from the training seasons. Fixed random seed.
+   - Comparisons: a baseline that predicts each pitch type's average run value, which the model
+     must beat, and scikit-learn gradient boosting (`HistGradientBoostingRegressor`) as a
+     reference. Gradient boosting is a strong default for tabular data like this, so if the
+     network lands far below it, the training code is the first suspect. It runs with default
+     settings and is not tuned or developed further; the network is the project's model.
 5. **Outputs:**
    - **Pitch score:** the predicted run value per 100 pitches for each row (its stuff value).
    - **Cumulative pitcher score (main ranking):** the sum over his pitches of predicted value per
@@ -75,7 +83,8 @@ The choice is made at the start of Phase 4.
 - **Held-out seasons:** every season's scores come from a model trained on the other seasons only,
   so no row is scored by a model that saw its label.
 - **Pitch level:** weighted correlation of predicted against actual run value per 100 on held-out
-  rows, compared with a baseline that predicts each pitch type's average.
+  rows, for the network, the gradient-boosting reference, and a baseline that predicts each pitch
+  type's average.
 - **Pitcher level:** Spearman rank correlation of pitcher scores with actual run value in the
   same season.
 - **Stability:** correlation of a starter's score in one season with his score in the next,
