@@ -53,7 +53,7 @@ The choice is made at the start of Phase 4.
    any size fit without fixed slots.
 2. **Inputs:** pitch type (a category; never grouped into families), the pitcher's throwing hand,
    and that pitch's season averages of velocity, spin rate, vertical break and horizontal break.
-   Left-handers' horizontal break is mirrored so arm-side movement has the same sign for both hands.
+   Left-handers' horizontal break is mirrored (sign flipped) so arm-side movement has the same sign for both hands: negative for arm-side, positive for glove-side, as raw Savant shows it for right-handers.
    Location, count, age and workload are deliberately not inputs: the score is about the pitches.
 3. **Label:** the same row's run value per 100 pitches over the season. Season totals average out
    the noise of single pitches; deliberate balls, chases, misses and hard contact all count. Rows

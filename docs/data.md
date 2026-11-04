@@ -103,17 +103,17 @@ Splitters and changeups are kept as separate pitch types. This table checks whet
 measurements alone tell them apart, or whether the pitch-type label has to. It uses the 2019 and
 2023 days from the table above (2022 had only 21 splitters), and only `CH` and `FS` rows.
 Vertical break is `pfx_z` in inches. Arm-side break is `pfx_x` in inches with left-handers
-flipped so both hands point the same way (see "Horizontal movement sign" below).
+flipped so both hands point the same way; arm-side is negative (see "Horizontal movement sign" below).
 
 | Day        | Type | Pitches | Speed (mph) | Spin (rpm) | Vertical break (in) | Arm-side break (in) |
 |------------|------|---------|-------------|------------|---------------------|---------------------|
-| 2019-06-15 | `CH` | 508     | 85.1        | 1,709      | 7.1                 | 13.7                |
-| 2019-06-15 | `FS` | 108     | 85.3        | 1,400      | 3.6                 | 10.6                |
-| 2023-06-15 | `CH` | 249     | 85.6        | 1,763      | 6.5                 | 12.9                |
-| 2023-06-15 | `FS` | 106     | 87.2        | 1,459      | 3.7                 | 12.3                |
+| 2019-06-15 | `CH` | 508     | 85.1        | 1,709      | 7.1                 | -13.7               |
+| 2019-06-15 | `FS` | 108     | 85.3        | 1,400      | 3.6                 | -10.6               |
+| 2023-06-15 | `CH` | 249     | 85.6        | 1,763      | 6.5                 | -12.9               |
+| 2023-06-15 | `FS` | 106     | 87.2        | 1,459      | 3.7                 | -12.3               |
 
 What it shows: speed is nearly the same for both (85.1 vs 85.3 mph in 2019, 85.6 vs 87.2 in
-2023) and so is arm-side break in 2023 (12.9 vs 12.3 inches). Spin and vertical break differ
+2023) and so is arm-side break in 2023 (-12.9 vs -12.3 inches, similar sizes). Spin and vertical break differ
 both days: splitters have about 300 rpm less spin and about half the vertical break (3.6 vs 7.1
 inches in 2019, 3.7 vs 6.5 in 2023). So spin and vertical break usually separate the two, and
 speed and arm-side break do not. Where the measurements overlap, the pitch-type label is what
