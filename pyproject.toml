@@ -3,7 +3,7 @@ name = "pitchlab"
 version = "0.1.0"
 license = "MIT"
 requires-python = ">=3.13"
-dependencies = ["pandas", "pyarrow", "requests", "scikit-learn"]
+dependencies = ["pandas", "pyarrow", "requests", "scikit-learn", "torch"]
 
 [project.optional-dependencies]
 dev = ["pytest"]
