@@ -1,3 +1,5 @@
+"""Project-wide settings: paths, kept columns and pitch types, seasons, cutoffs, download timing."""
+
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]

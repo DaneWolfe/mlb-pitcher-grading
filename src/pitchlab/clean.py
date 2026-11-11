@@ -1,3 +1,5 @@
+"""Cleaning step: raw Savant rows to the tidy pitches the database stores."""
+
 import logging
 import pandas as pd
 from pitchlab.config import PITCH_TYPES, PITCH_TYPE_ALIASES
@@ -5,6 +7,8 @@ from pitchlab.config import PITCH_TYPES, PITCH_TYPE_ALIASES
 logger = logging.getLogger(__name__)
 
 def clean_pitches(raw: pd.DataFrame) -> pd.DataFrame:
+    """Return the cleaned copy of `raw` (the input is not changed)."""
+
     df = raw.copy()
     start_rows = len(df)
 

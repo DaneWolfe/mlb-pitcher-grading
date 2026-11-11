@@ -1,3 +1,5 @@
+"""Pipeline: download -> clean -> store (`python -m pitchlab.pipeline build`)."""
+
 import logging
 import argparse
 import pandas as pd
@@ -12,6 +14,8 @@ from pitchlab.ingest import download_range
 logger = logging.getLogger(__name__)
 
 def build_season(year: int, raw_dir: Path = DATA_DIR / "raw", db_path: Path = DB_PATH) -> dict[str, int]:
+    """Download, clean and store one season. Returns the row counts {'raw', 'clean', 'inserted'}."""
+
     init_db(db_path)
 
     # March 15 and Oct 10 to safely cover the entire regular season
@@ -41,6 +45,8 @@ def build_season(year: int, raw_dir: Path = DATA_DIR / "raw", db_path: Path = DB
     }
 
 def build_all() -> dict[int, dict[str, int]]:
+    """Run build_season for every season in SEASONS. Returns the counts per season."""
+
     # No try/except on purpose: a failed season should stop the run with its real error. Downloaded days are
     # cached and inserts skip existing rows, so running it again picks up where it stopped
     results = {}

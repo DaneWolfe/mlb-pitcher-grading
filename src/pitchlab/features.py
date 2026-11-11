@@ -1,7 +1,11 @@
+"""Feature step: build the one-row-per-(pitcher, season, pitch type) table the model learns from."""
+
 import pandas as pd
 from pitchlab.config import MIN_PITCH_TYPE_PITCHES
 
 def add_arm_side_break(pitches: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy of `pitches` with `hb_arm_in` added: horizontal break flipped for left-handers."""
+
     df = pitches.copy()
 
     sign = df["p_throws"].map({
@@ -16,6 +20,8 @@ def add_arm_side_break(pitches: pd.DataFrame) -> pd.DataFrame:
     return df
 
 def build_pitch_seasons(pitches: pd.DataFrame) -> pd.DataFrame:
+    """Return one row per (pitcher, season, pitch type) with at least MIN_PITCH_TYPE_PITCHES pitches."""
+
     df = pitches.copy()
     df["run_value"] = df["run_value"].astype("float64")
 
