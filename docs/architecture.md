@@ -64,7 +64,8 @@ The choice is made at the start of Phase 4.
    - Network: two hidden layers of 32 to 64 units. The data is tens of thousands of rows, so a
      bigger network would memorize the training seasons instead of learning from them.
    - Training: mean squared error weighted by pitch count, Adam optimizer, mini-batches, and early
-     stopping on a validation split taken from the training seasons. Fixed random seed.
+     stopping on a validation split taken from the training seasons. The random seed is drawn
+     fresh each run, then logged and saved with the results, so any run can be reproduced exactly.
    - Comparisons: a baseline that predicts each pitch type's average run value, which the model
      must beat, and scikit-learn gradient boosting (`HistGradientBoostingRegressor`) as a
      reference. Gradient boosting is a strong default for tabular data like this, so if the
