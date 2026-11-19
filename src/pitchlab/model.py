@@ -3,13 +3,22 @@
 import pandas as pd
 import numpy as np
 import torch
+import copy
+import logging
 from torch import nn
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 FEATURES = ["pitch_type", "p_throws", "velo_mph", "spin_rpm", "ivb_in", "hb_arm_in"]
 LABEL = "run_value_per100"
 WEIGHT = "pitches"
 NUMBERS = ["velo_mph", "spin_rpm", "ivb_in", "hb_arm_in"]
+
+BATCH_SIZE = 256
+MAX_EPOCHS = 300
+PATIENCE = 20
+LEARNING_RATE = 1e-3
 
 class PitchNet(nn.Module):
     """Small neural network: learned vectors for pitch type and hand, plus four numbers, through two hidden layers."""
@@ -104,3 +113,74 @@ def split_validation(train: pd.DataFrame, seed: int, fraction: float = 0.1) -> t
     is_validation = np.random.default_rng(seed).random(len(train)) < fraction
 
     return train[~is_validation], train[is_validation]
+
+def _weighted_mse(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+
+    return (weight * (pred - target) ** 2).sum() / weight.sum()
+
+def fit(train: pd.DataFrame, kind: str = "mlp", seed: int | None = None) -> Model:
+
+    if kind != "mlp":
+        raise NotImplementedError("Only choice available is mlp")
+
+    if seed is None:
+        seed = new_seed()
+    logger.info("Training with seed %d", seed)
+
+    torch.manual_seed(seed)
+
+    type_map = {t: i for i, t in enumerate(sorted(train["pitch_type"].astype(str).unique()))}
+    hand_map = {h: i for i, h in enumerate(sorted(train["p_throws"].astype(str).unique()))}
+
+    means = train[NUMBERS].mean()
+    stds = train[NUMBERS].std()
+
+    fit_rows, val_rows = split_validation(train, seed)
+
+    fit_in = encode(fit_rows, type_map, hand_map, means, stds)
+    val_in = encode(val_rows, type_map, hand_map, means, stds)
+
+    fit_y = torch.tensor(fit_rows[LABEL].to_numpy(), dtype = torch.float32)
+    fit_w = torch.tensor(fit_rows[WEIGHT].to_numpy(), dtype = torch.float32)
+
+    val_y = torch.tensor(val_rows[LABEL].to_numpy(), dtype = torch.float32)
+    val_w = torch.tensor(val_rows[WEIGHT].to_numpy(), dtype = torch.float32)
+
+    net = PitchNet(n_types = len(type_map), n_hands = len(hand_map))
+    optimizer = torch.optim.Adam(net.parameters(), lr = LEARNING_RATE)
+    shuffler = torch.Generator().manual_seed(seed)
+
+    best_loss = float("inf")
+    best_state = copy.deepcopy(net.state_dict())
+    stale_epochs = 0
+
+    for epoch in range(MAX_EPOCHS):
+        net.train()
+        order = torch.randperm(len(fit_rows), generator = shuffler)
+
+        for start in range(0, len(order), BATCH_SIZE):
+            idx = order[start:start + BATCH_SIZE]
+            pred = net(fit_in[0][idx], fit_in[1][idx], fit_in[2][idx])
+            loss = _weighted_mse(pred, fit_y[idx], fit_w[idx])
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+        net.eval()
+        with torch.no_grad():
+            val_loss = _weighted_mse(net(*val_in), val_y, val_w).item()
+
+        if val_loss < best_loss:
+            best_loss = val_loss
+            best_state = copy.deepcopy(net.state_dict())
+            stale_epochs = 0
+        else:
+            stale_epochs += 1
+            if stale_epochs >= PATIENCE:
+                break
+
+    net.load_state_dict(best_state)
+    logger.info("Stopped after %d epochs, best validation loss: %.4f", epoch + 1, best_loss)
+
+    return Model(net, type_map, hand_map, means, stds, seed)

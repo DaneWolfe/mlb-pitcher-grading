@@ -1,7 +1,8 @@
+import numpy as np
 import pandas as pd
 import pytest
 import torch
-from pitchlab.model import NUMBERS, Model, PitchNet, baseline_type_average, encode, new_seed, predict, split_validation
+from pitchlab.model import NUMBERS, Model, PitchNet, baseline_type_average, encode, fit, new_seed, predict, split_validation
 
 # A plain mean of the two FF rows would be 2.5; weighting by pitches pulls it toward the 300-pitch row
 def test_baseline_is_the_pitch_weighted_average_per_type():
@@ -78,3 +79,36 @@ def test_split_validation_partitions_the_rows_and_repeats_with_the_same_seed():
 
 def test_new_seed_fits_in_32_bits():
     assert 0 <= new_seed() < 2**32
+
+
+def _train_rows(n=200):
+    rng = np.random.default_rng(0)
+    return pd.DataFrame({
+        "pitch_type": rng.choice(["FF", "SL", "CH"], n),
+        "p_throws": rng.choice(["R", "L"], n),
+        "velo_mph": rng.normal(90, 3, n),
+        "spin_rpm": rng.normal(2300, 150, n),
+        "ivb_in": rng.normal(12, 4, n),
+        "hb_arm_in": rng.normal(6, 4, n),
+        "run_value_per100": rng.normal(0, 1, n),
+        "pitches": rng.integers(30, 500, n),
+    })
+
+
+# Weight init, the validation split and batch order must all come from the seed, or runs can't be repeated
+def test_fit_with_the_same_seed_gives_the_same_predictions():
+    train = _train_rows()
+    first = fit(train, seed=7)
+    second = fit(train, seed=7)
+    assert first.seed == 7
+    assert predict(first, train).tolist() == pytest.approx(predict(second, train).tolist())
+
+
+def test_fit_without_a_seed_draws_one_and_stores_it():
+    model = fit(_train_rows(), seed=None)
+    assert 0 <= model.seed < 2**32
+
+
+def test_fit_rejects_a_kind_other_than_mlp():
+    with pytest.raises(NotImplementedError):
+        fit(_train_rows(), kind="gbm")
