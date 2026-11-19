@@ -5,9 +5,6 @@ spin, movement, where it crossed the plate, the count, and the batter's side. A 
 from past seasons, then the pitches are summed into a score for each pitcher. No premade pitch
 grades such as Stuff+ are used.
 
-Example: rank the 2025 starters by what their pitches were worth, then compare with what they
-actually allowed.
-
 Scope: every pitcher's pitches train the model; rankings cover starters (at least 1,850 pitches,
 about 115 innings, in the season).
 
@@ -25,8 +22,7 @@ value. A single pitch is noisy, but over millions of pitches the model learns wh
 in a given spot and count, is worth on average.
 
 **The model.** A small PyTorch neural network. It has to beat a simple baseline (each pitch type's
-average run value in each count), and a scikit-learn gradient-boosting model is trained alongside
-it as a reference.
+average run value in each count).
 
 **Pitchers are ranked by their pitches.** The main score is cumulative: the predicted run value of
 every pitch he threw, summed over the season. It rewards both quality and workload. Shown next to
@@ -69,7 +65,7 @@ Phase 2 is in progress.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md): components, pitch model, hosting
+- [Architecture](docs/architecture.md): components, pitch model
 - [Data](docs/data.md): data source, columns, units, pitch types, season coverage, known quirks
 
 ## Setup

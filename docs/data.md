@@ -202,9 +202,6 @@ invalid count; those columns are listed under "Open checks" above.
 | 2025   | 712,528    | 706,000 | 6,528   | 0.92%  | 4,667                       | 1,861           |
 | 2026   | 716,792    | 710,845 | 5,947   | 0.83%  | 4,864                       | 1,083           |
 
-The 2026-09-01 sample had 0.2% of rows blank (see "Source"), which suggested a similar share
-would be dropped. Every full season is higher.
-
 - The largest part of every season is a blank `pitch_type` (2,054 to 7,329 rows). The rest are
   the codes dropped on purpose (`EP`, `FA`, `KN`, `PO`, `SC`, `UN`). Why Savant leaves the type
   blank on those rows has not been checked.
@@ -241,8 +238,7 @@ the pitch is nearly unaffected. The cause of the missing spin has not been found
 clean for sliders. Other pitch types lose a smaller share in 2017-2019 (in 2017, about 2% of
 curveballs and about 5% of splitters); only 2017 was checked by type.
 
-The rows are left as they are. Open check for the model phase: train with and without the
-2017-2019 sliders and see whether slider results move.
+The rows are left as they are.
 
 ## Cutoffs
 
@@ -304,8 +300,6 @@ next-season checks, across the seven usable pairs (2017-18, 2018-19, 2021-22, 20
 | >= 1,000 pitches        | 637   |
 | >= 500 pitches          | 703   |
 
-Pitch counts per pitcher-season can be cross-checked against `numberOfPitches` from this API.
-
 ## Cross-check sources
 
 Not used as inputs; for verifying computed per-pitcher values.
@@ -335,8 +329,6 @@ totals, so it cannot be used to count qualifiers.
 - Raw downloads: one Parquet file per day under `data/raw/`, named `savant_YYYY-MM-DD.parquet`.
   Days with no games are saved as empty files so they are not requested again. Not committed.
 - Database: `data/pitches.db`, SQLite. Not committed.
-
-More tables are added here as they are implemented.
 
 ### `pitches`
 

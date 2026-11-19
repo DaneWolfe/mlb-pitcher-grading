@@ -3,7 +3,7 @@
 ## Overview
 
 ```
- OFFLINE (run manually or on a schedule)                  ONLINE (always on)
+ OFFLINE (run manually)                                   ONLINE (always on)
  ----------------------------------------------           -------------------------------
  Baseball Savant --CSV--> [pipeline] --writes--> SQLite --reads--> [API] --JSON--> [Browser]
                           download               file             FastAPI         frontend
@@ -21,8 +21,7 @@ pipeline fails.
 ### Pipeline
 Python script (`pitchlab.pipeline`) that downloads, cleans, stores, builds features, trains and
 scores. It runs and exits; each step is safe to re-run. Built so far: download, clean and store
-(`python -m pitchlab.pipeline build`). Features, training and scoring come in Phase 2. It can later be scheduled (GitHub Actions
-cron or Windows Task Scheduler) to refresh the current season.
+(`python -m pitchlab.pipeline build`). Features, training and scoring come in Phase 2.
 
 ### Storage
 - **Raw downloads:** Parquet, one file per day under `data/raw/`. Compact, typed, and lets an
@@ -38,9 +37,8 @@ request validation and interactive docs (`/docs`) from type hints. CORS is enabl
 frontend's origin.
 
 ### Frontend
-Not yet decided. The scope is small: a ranking table, an evaluation table and a pitcher detail
-page (one line per pitch), all reading from the API. Candidates are React, Svelte, Vue, or plain HTML and JavaScript.
-The choice is made at the start of Phase 4.
+Not built yet. The scope is small: a ranking table, an evaluation table and a pitcher detail
+page (one line per pitch), all reading from the API.
 
 ### Tests and CI
 `pytest`, run on every push by GitHub Actions (`.github/workflows/`).
@@ -72,11 +70,8 @@ The choice is made at the start of Phase 4.
    - Training: mean squared error, Adam optimizer, mini-batches, and early stopping on a
      validation split taken from the training seasons. The random seed is drawn fresh each run,
      then logged and saved with the results, so any run can be reproduced exactly.
-   - Comparisons: a baseline that predicts each pitch type's average run value in each count,
-     which the model must beat, and scikit-learn gradient boosting (`HistGradientBoostingRegressor`)
-     as a reference. Gradient boosting is a strong default for tabular data like this, so if the
-     network lands far below it, the training code is the first suspect. It runs with default
-     settings and is not tuned or developed further; the network is the project's model.
+   - Comparison: a baseline that predicts each pitch type's average run value in each count,
+     which the model must beat.
 5. **Outputs:**
    - **Pitch-type score:** the average predicted run value per 100 pitches of each pitch type a
      pitcher threw in a season (for the pitcher page and "top pitches").
@@ -93,7 +88,7 @@ The choice is made at the start of Phase 4.
 - **Held-out seasons:** every season's scores come from a model trained on the other seasons only,
   so no pitch is scored by a model that saw its label.
 - **Pitch level:** on held-out pitches, the error and correlation of predicted against actual run
-  value, for the network, the gradient-boosting reference, and the pitch-type-and-count baseline.
+  value, for the network and the pitch-type-and-count baseline.
   Single pitches are noisy, so the same comparison is also made per pitcher, season and pitch type
   (weighted by pitches).
 - **Pitcher level:** Spearman rank correlation of pitcher scores with actual run value in the
@@ -108,24 +103,9 @@ The choice is made at the start of Phase 4.
 - The batter's identity, base-out state, sequencing and defense are not inputs; they remain in the
   actual run value and show up in the gap.
 - Location cannot tell a deliberate ball from a miss; the score credits or charges it either way.
-- Arsenal depth and how pitches play off each other are not modeled at the start. Candidate
-  inputs, kept only if held-out results improve: number of pitch types thrown, and each pitch's
-  speed and movement difference from the pitcher's main fastball.
-- Training time on about 6 million rows per fit has not been measured. If it is too slow, the
-  training seasons are subsampled; the held-out season is always scored in full.
+- Arsenal depth and how pitches play off each other are not modeled.
 - The cumulative score rewards workload; the rate score is shown alongside it.
 - Pitch types are Savant's classifications, which changed over the years (see [data.md](data.md));
   rare types such as forkballs have few rows, so the model leans on their physical measurements.
 - 2020 (60 games) is excluded. Whether tracking measurements are comparable across system changes
   has not been checked.
-
-## Hosting
-
-Development runs on localhost. For publication:
-
-- **API host:** a platform that runs uvicorn continuously (Render, Fly.io or Railway), deployed
-  from the GitHub repository with a small results-only SQLite file.
-- **Static host** for the frontend: GitHub Pages, Netlify or Vercel.
-
-Free tiers change and commonly sleep idle apps; check them when choosing. The project needs no
-secrets; any host configuration goes in environment variables and is never committed.
