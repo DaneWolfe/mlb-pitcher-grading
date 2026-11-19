@@ -16,5 +16,8 @@ jobs:
         with:
           python-version: "3.13"
           cache: pip
+      - run: pip install torch --index-url https://download.pytorch.org/whl/cpu
       - run: pip install -e ".[dev]"
+      - run: pip install bandit
       - run: pytest
+      - run: bandit -r src -ll

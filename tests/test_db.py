@@ -4,16 +4,17 @@ import pandas as pd
 import pytest
 from pitchlab.db import init_db, insert_pitches, read_pitches, write_table
 
-# The 13 columns clean_pitches returns, in order. If clean_pitches gains or loses a column, this
+# The 20 columns clean_pitches returns, in order. If clean_pitches gains or loses a column, this
 # list and the table must change together
 PITCH_COLUMNS = [
     "game_pk", "at_bat_number", "pitch_number", "pitcher_id", "player_name", "p_throws",
     "pitch_type", "velo_mph", "spin_rpm", "hb_in", "ivb_in", "run_value", "season",
+    "stand", "balls", "strikes", "plate_x_in", "plate_z_in", "sz_top_in", "sz_bot_in",
 ]
 
 def insert_pitch(conn, game_pk = 100, at_bat_number = 1, pitch_number = 1):
     # Every column gets a value; only the three key columns vary between rows
-    values = [game_pk, at_bat_number, pitch_number, 123456, "Doe, John", "R", "FF", 95.0, 2300.0, -6.0, 12.0, 0.1, 2026]
+    values = [game_pk, at_bat_number, pitch_number, 123456, "Doe, John", "R", "FF", 95.0, 2300.0, -6.0, 12.0, 0.1, 2026, "L", 1, 2, 3.0, 30.0, 42.0, 18.0]
     placeholders = ", ".join("?" * len(PITCH_COLUMNS))
     conn.execute(f"INSERT INTO pitches ({', '.join(PITCH_COLUMNS)}) VALUES ({placeholders})", values)
 
@@ -95,13 +96,16 @@ def make_df(*keys):
             "game_pk": game_pk, "at_bat_number": at_bat_number, "pitch_number": pitch_number,
             "pitcher_id": 123456, "player_name": "Doe, John", "p_throws": "R", "pitch_type": "FF",
             "velo_mph": 95.5, "spin_rpm": 2300.0, "hb_in": -6.0, "ivb_in": 12.0, "run_value": 0.25,
-            "season": 2026,
+            "season": 2026, "stand": "L", "balls": 1, "strikes": 2,
+            "plate_x_in": 3.0, "plate_z_in": 30.0, "sz_top_in": 42.0, "sz_bot_in": 18.0,
         }
         for game_pk, at_bat_number, pitch_number in keys
     ])
     return df.astype({
         "pitch_type": "category", "p_throws": "category",
         "velo_mph": "float32", "spin_rpm": "float32", "hb_in": "float32", "ivb_in": "float32", "run_value": "float32",
+        "stand": "category", "plate_x_in": "float32", "plate_z_in": "float32",
+        "sz_top_in": "float32", "sz_bot_in": "float32",
     })
 
 def count_pitches(db_path):
@@ -140,6 +144,12 @@ def test_insert_pitches_stores_each_value_in_its_own_column(tmp_path):
     assert row["ivb_in"] == pytest.approx(12.0)
     assert row["run_value"] == pytest.approx(0.25)
     assert row["season"] == 2026
+    assert row["stand"] == "L"
+    assert (row["balls"], row["strikes"]) == (1, 2)
+    assert row["plate_x_in"] == pytest.approx(3.0)
+    assert row["plate_z_in"] == pytest.approx(30.0)
+    assert row["sz_top_in"] == pytest.approx(42.0)
+    assert row["sz_bot_in"] == pytest.approx(18.0)
 
 # Tests insert_pitches: the DataFrame's column order does not matter
 def test_insert_pitches_ignores_dataframe_column_order(tmp_path):

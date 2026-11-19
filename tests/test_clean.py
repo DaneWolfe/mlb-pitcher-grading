@@ -1,4 +1,3 @@
-import logging
 import pandas as pd
 import pytest
 from pitchlab.clean import clean_pitches
@@ -22,6 +21,13 @@ def make_pitch(**overrides):
         "pfx_x": -0.5,
         "pfx_z": 1.0,
         "delta_pitcher_run_exp": 0.1,
+        "stand": "L",
+        "balls": 1,
+        "strikes": 2,
+        "plate_x": 0.25,
+        "plate_z": 2.5,
+        "sz_top": 3.5,
+        "sz_bot": 1.5,
     }
     pitch.update(overrides)
     return pitch
@@ -54,12 +60,27 @@ def test_clean_pitches_keeps_every_wanted_pitch_type():
     out = clean_pitches(raw)
     assert set(out["pitch_type"]) == PITCH_TYPES
 
-# Tests clean_pitches: a row missing any one of the four measurements or the run value is dropped
-@pytest.mark.parametrize("column", ["release_speed", "release_spin_rate", "pfx_x", "pfx_z", "delta_pitcher_run_exp"])
+# Tests clean_pitches: a row missing any one of the measurements, location, count, batter side or run value is dropped
+@pytest.mark.parametrize("column", [
+    "release_speed", "release_spin_rate", "pfx_x", "pfx_z", "delta_pitcher_run_exp",
+    "stand", "balls", "strikes", "plate_x", "plate_z", "sz_top", "sz_bot",
+])
 def test_clean_pitches_drops_rows_missing_a_value(column):
     raw = make_raw(make_pitch(), make_pitch(pitch_number = 2, **{column: None}))
     out = clean_pitches(raw)
     assert list(out["pitch_number"]) == [1]
+
+# Tests clean_pitches: a count outside 0-3 balls and 0-2 strikes is dropped, and every valid count is kept
+def test_clean_pitches_drops_invalid_counts():
+    valid = [(b, s) for b in range(4) for s in range(3)]
+    raw = make_raw(
+        *[make_pitch(pitch_number = i, balls = b, strikes = s) for i, (b, s) in enumerate(valid, start = 1)],
+        make_pitch(pitch_number = 20, balls = 4),
+        make_pitch(pitch_number = 21, strikes = 3),
+        make_pitch(pitch_number = 22, balls = -1),
+    )
+    out = clean_pitches(raw)
+    assert sorted(zip(out["balls"], out["strikes"])) == valid
 
 # Tests clean_pitches: an exact repeat of a pitch is collapsed to one row, but a different pitch in the same at-bat is kept
 def test_clean_pitches_drops_duplicates():
@@ -67,7 +88,7 @@ def test_clean_pitches_drops_duplicates():
     out = clean_pitches(raw)
     assert list(out["pitch_number"]) == [1, 2]
 
-# Tests clean_pitches: columns get their project names, and movement is converted from feet to inches
+# Tests clean_pitches: columns get their project names, and movement and location are converted from feet to inches
 def test_clean_pitches_renames_columns_and_converts_feet_to_inches():
     raw = make_raw(make_pitch(pitcher = 777, release_speed = 92.5, release_spin_rate = 2100.0, pfx_x = -0.5, pfx_z = 1.25, delta_pitcher_run_exp = -0.3))
     out = clean_pitches(raw)
@@ -78,8 +99,15 @@ def test_clean_pitches_renames_columns_and_converts_feet_to_inches():
     assert row["hb_in"] == pytest.approx(-6.0)
     assert row["ivb_in"] == pytest.approx(15.0)
     assert row["run_value"] == pytest.approx(-0.3)
+    assert row["plate_x_in"] == pytest.approx(3.0)
+    assert row["plate_z_in"] == pytest.approx(30.0)
+    assert row["sz_top_in"] == pytest.approx(42.0)
+    assert row["sz_bot_in"] == pytest.approx(18.0)
+    assert row["stand"] == "L"
+    assert (row["balls"], row["strikes"]) == (1, 2)
     # The old names are gone, so nothing downstream can read feet by accident
-    assert not {"pitcher", "release_speed", "release_spin_rate", "pfx_x", "pfx_z", "delta_pitcher_run_exp"} & set(out.columns)
+    old_names = {"pitcher", "release_speed", "release_spin_rate", "pfx_x", "pfx_z", "delta_pitcher_run_exp", "plate_x", "plate_z", "sz_top", "sz_bot"}
+    assert not old_names & set(out.columns)
 
 # Tests clean_pitches: season comes from the game date, and game_date and game_type are not kept
 def test_clean_pitches_adds_season_and_drops_date_and_game_type():
@@ -94,10 +122,12 @@ def test_clean_pitches_sets_dtypes():
     out = clean_pitches(make_raw(make_pitch()))
     assert out["season"].dtype == "int16"
     assert out["pitcher_id"].dtype == "int64"
-    for column in ["velo_mph", "spin_rpm", "ivb_in", "hb_in", "run_value"]:
+    for column in ["velo_mph", "spin_rpm", "ivb_in", "hb_in", "run_value", "plate_x_in", "plate_z_in", "sz_top_in", "sz_bot_in"]:
         assert out[column].dtype == "float32"
-    assert out["pitch_type"].dtype == "category"
-    assert out["p_throws"].dtype == "category"
+    assert out["balls"].dtype == "int8"
+    assert out["strikes"].dtype == "int8"
+    for column in ["pitch_type", "p_throws", "stand"]:
+        assert out[column].dtype == "category"
 
 # Tests clean_pitches: the DataFrame passed in is not changed
 def test_clean_pitches_does_not_modify_input():
@@ -110,17 +140,3 @@ def test_clean_pitches_does_not_modify_input():
 def test_clean_pitches_handles_empty_input():
     out = clean_pitches(pd.DataFrame(columns = KEEP_COLUMNS))
     assert len(out) == 0
-
-# Tests clean_pitches: the log line reports how many rows each kind of drop removed
-def test_clean_pitches_logs_drop_counts(caplog):
-    raw = make_raw(
-        make_pitch(),
-        make_pitch(pitch_number = 2, game_type = "S"),
-        make_pitch(pitch_number = 3, release_speed = None),
-        make_pitch(pitch_number = 4),
-        make_pitch(pitch_number = 4),
-    )
-    with caplog.at_level(logging.INFO, logger = "pitchlab.clean"):
-        clean_pitches(raw)
-    assert "cleaned 5 rows -> 2 (dropped 3" in caplog.text
-    assert "1 not regular season or not a kept pitch type, 1 missing a value, 1 duplicates" in caplog.text

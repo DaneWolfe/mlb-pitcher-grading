@@ -1,39 +1,33 @@
 # MLB Pitcher Grading
 
-Scores MLB pitchers by their pitches alone: pitch type, velocity, spin rate, and vertical and
-horizontal break. A model learns from past seasons what pitches with these traits are worth, then
-grades each pitcher's arsenal. No premade pitch grades such as Stuff+ are used, and pitch location
-is deliberately left out.
-
-Example: rank the 2025 starters by what their arsenals were worth, then compare with what they
-actually allowed.
+Scores MLB pitchers from raw Statcast data: what each pitch was worth given its type, velocity,
+spin, movement, where it crossed the plate, the count, and the batter's side. A model learns this
+from past seasons, then the pitches are summed into a score for each pitcher. No premade pitch
+grades such as Stuff+ are used.
 
 Scope: every pitcher's pitches train the model; rankings cover starters (at least 1,850 pitches,
 about 115 innings, in the season).
 
 ## How it works
 
-**One row per pitch type, per pitcher, per season.** Every pitch type a pitcher threw at least 30
-times in a season becomes a row: its average velocity, spin rate, vertical break and horizontal
-break, the pitch type itself, and the pitcher's throwing hand. Pitch types are never grouped into
-families, so a splitter and a changeup are different inputs. A pitcher with five pitches has five
-rows; one with three has three.
-
 **Results are measured in run value.** Each pitch is credited with how much it changed the
-expected number of runs, from the pitcher's side. A row's label is that pitch's run value per 100
-pitches over the whole season, so chases, deliberate balls, misses and hard contact all count. A
-single pitch is too noisy to judge; a season of them is not.
+expected number of runs, from the pitcher's side. Run value already depends on the count: a ball
+in a 3-2 count costs more than a ball in 0-0.
 
-**The model learns what pitch traits are worth.** A small PyTorch neural network learns how type,
-speed, spin and movement relate to run value. It has to beat a simple
-baseline (each pitch type's average run value), and a scikit-learn gradient-boosting model is
-trained alongside it as a reference. Its prediction for a row is that pitch's stuff value:
-what a pitch with those traits is worth on average, independent of location, count or luck.
+**One row per pitch.** Inputs are the pitch type, the pitcher's and batter's hands, the count, the
+pitch's velocity, spin rate, vertical and horizontal break, and where it crossed the plate
+(horizontal position and height within that batter's strike zone). Pitch types are never grouped
+into families, so a splitter and a changeup are different inputs. The label is that pitch's run
+value. A single pitch is noisy, but over millions of pitches the model learns what a given pitch,
+in a given spot and count, is worth on average.
 
-**Pitchers are ranked by their arsenals.** The main score is cumulative: each pitch's predicted
-value per 100 pitches times how many he threw, summed over his arsenal. It rewards both quality and
-workload. A rate score (stuff value per 100 pitches) is shown next to it, along with the gap between
-actual and predicted run value ("results beat or lagged his stuff").
+**The model.** A small PyTorch neural network. It has to beat a simple baseline (each pitch type's
+average run value).
+
+**Pitchers are ranked by their pitches.** The main score is cumulative: the predicted run value of
+every pitch he threw, summed over the season. It rewards both quality and workload. Shown next to
+it: the rate per 100 pitches, and the gap between actual and predicted run value ("results beat or
+lagged his pitches").
 
 **Checks.** Each season is scored by a model trained without that season. Scores are compared with
 actual results, tested for stability from one season to the next (against the stability of results
@@ -45,8 +39,11 @@ frontend) is described in [docs/architecture.md](docs/architecture.md).
 
 ## Limitations
 
-- Location, count, batter, sequencing and defense are not inputs. They still affect each pitch's
-  actual run value, so they appear in the gap between actual and predicted value, not in the score.
+- The batter's identity, sequencing (what came before the pitch), base-out state and defense are
+  not inputs. They still affect each pitch's actual run value, so they appear in the gap between
+  actual and predicted value, not in the score.
+- Location cannot tell a deliberate ball from a miss. The score credits or charges the location
+  either way.
 - Arsenal depth (how many pitches a pitcher can use) is not measured directly; an extra pitch adds
   to the cumulative score only if it is good on its own.
 - The cumulative score rewards workload, so a pitcher who missed time ranks lower even with elite
@@ -68,7 +65,7 @@ Phase 2 is in progress.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md): components, pitch model, hosting
+- [Architecture](docs/architecture.md): components, pitch model
 - [Data](docs/data.md): data source, columns, units, pitch types, season coverage, known quirks
 
 ## Setup
@@ -93,7 +90,12 @@ setup, if you need to match them.
 ```powershell
 python -m pitchlab.pipeline build              # every season: 2017-2019 and 2021-2026
 python -m pitchlab.pipeline build --year 2025  # one season
+python -m pitchlab.train                       # train on 2017-2024, test on 2025-2026
 ```
+
+`train` fits the model on every season except 2025 and 2026, prints its error and the pitch-type
+baseline's error on those two seasons, and saves the model to `data/model.pkl`. The file is a
+Python pickle, so only load one you made yourself.
 
 For each season, `build` downloads every day from March 15 to October 10 from Baseball Savant
 into `data/raw/` (one file per day), cleans the pitches (see [docs/data.md](docs/data.md)) and
@@ -101,8 +103,8 @@ stores them in `data/pitches.db`, a SQLite database. Days already downloaded are
 pitches already stored are not added twice, so a stopped run can simply be started again.
 
 The first full build sends about 1,900 requests and pauses 1.1 seconds after each one, so the
-pauses alone take about 35 minutes. Afterward `data/raw/` holds about 105 MB and `pitches.db`
-about 605 MB.
+pauses alone take about 35 minutes. The size of `data/raw/` and `pitches.db` with all nine
+seasons has not been measured yet.
 
 ## License
 

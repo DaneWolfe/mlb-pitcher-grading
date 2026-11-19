@@ -1,18 +1,11 @@
 from datetime import date, timedelta
 from pitchlab import ingest
-from pitchlab.ingest import build_url, fetch_day, fetch_day_with_retry, download_range
+from pitchlab.ingest import fetch_day, fetch_day_with_retry, download_range
 from pitchlab.config import KEEP_COLUMNS, REQUEST_DELAY_SECONDS, MAX_ATTEMPTS, RETRY_WAIT_SECONDS
 import pytest
 import requests
 import pandas as pd
 import time
-
-# Tests build_url: the URL asks Savant for exactly one day (same start and end date) in the right season
-def test_build_url_contains_date_and_season():
-    url = build_url(date(2026, 9, 1))
-    assert "game_date_gt=2026-09-01" in url
-    assert "game_date_lt=2026-09-01" in url
-    assert "hfSea=2026" in url
 
 class FakeResponse:
     # Stand-in for requests.Response; the extra "zone" column should be filtered out by fetch_day

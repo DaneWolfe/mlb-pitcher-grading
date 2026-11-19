@@ -1,3 +1,5 @@
+"""Storage step: the SQLite database."""
+
 import sqlite3
 import pandas as pd
 from contextlib import closing
@@ -5,9 +7,11 @@ from pathlib import Path
 
 # insert_pitches sends values by position, not by name, so this order must match the CREATE TABLE in
 # init_db. A mismatch would not raise an error, instead quietly storing values under the wrong columns
-PITCH_COLUMNS = ["game_pk", "at_bat_number", "pitch_number", "pitcher_id", "player_name", "p_throws", "pitch_type", "velo_mph", "spin_rpm", "hb_in", "ivb_in", "run_value", "season"]
+PITCH_COLUMNS = ["game_pk", "at_bat_number", "pitch_number", "pitcher_id", "player_name", "p_throws", "pitch_type", "velo_mph", "spin_rpm", "hb_in", "ivb_in", "run_value", "season", "stand", "balls", "strikes", "plate_x_in", "plate_z_in", "sz_top_in", "sz_bot_in"]
 
 def init_db(path: Path) -> None:
+    """Create the database file, its folder, and the `pitches` table if they do not exist yet. Safe to re-run."""
+
     path.parent.mkdir(parents = True, exist_ok = True)
 
     with closing(sqlite3.connect(path)) as conn:
@@ -26,26 +30,42 @@ def init_db(path: Path) -> None:
                 ivb_in REAL,
                 run_value REAL,
                 season INTEGER,
+                stand TEXT,
+                balls INTEGER,
+                strikes INTEGER,
+                plate_x_in REAL,
+                plate_z_in REAL,
+                sz_top_in REAL,
+                sz_bot_in REAL,
                 PRIMARY KEY (game_pk, at_bat_number, pitch_number)
             )
         """)
 
 def insert_pitches(df: pd.DataFrame, path: Path) -> int:
+    """Add cleaned pitches to the `pitches` table and return how many were actually new."""
+
     rows = df[PITCH_COLUMNS].astype(object).values.tolist()
+
+    # One "?" per column, built from PITCH_COLUMNS so adding a column can't leave the count wrong
+    placeholders = ", ".join("?" * len(PITCH_COLUMNS))
 
     with closing(sqlite3.connect(path)) as conn:
         before = conn.execute("SELECT COUNT(*) FROM pitches").fetchone()[0]
         with conn:
-            conn.executemany("INSERT OR IGNORE INTO pitches VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", rows)
+            conn.executemany(f"INSERT OR IGNORE INTO pitches VALUES ({placeholders})", rows)
         after = conn.execute("SELECT COUNT(*) FROM pitches").fetchone()[0]
 
     return after - before
 
 def read_pitches(path: Path, season: int) -> pd.DataFrame:
+    """Return every stored pitch for one season as a DataFrame."""
+
     with closing(sqlite3.connect(path)) as conn:
         return pd.read_sql_query("SELECT * FROM pitches WHERE season = ?", conn, params = (season,))
 
 def write_table(df: pd.DataFrame, table: str, path: Path) -> None:
+    """Replace table `table` with `df`. Only for derived tables: refuses `pitches` and invalid table names."""
+
     if not table.isidentifier():
         raise ValueError(f"Not a valid table name: {table!r}")
     # to_sql with if_exists = "replace" (below) drops the table and rebuilds it without the primary key.
