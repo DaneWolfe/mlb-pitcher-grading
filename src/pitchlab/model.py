@@ -1,26 +1,27 @@
-"""Pitch model: a small PyTorch network and the type-average baseline it must beat."""
+"""A small PyTorch pitch model and the type-average baseline it must beat."""
 
 import pandas as pd
 import numpy as np
 import torch
 import copy
 import logging
+import time
 from torch import nn
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-LABEL = "run_value_per100"
-WEIGHT = "pitches"
-
-BATCH_SIZE = 256
+BATCH_SIZE = 1024
 MAX_EPOCHS = 300
-PATIENCE = 20
+PATIENCE = 10
+# An epoch only counts as progress if it beats the best validation loss by at least this much. Without it,
+# tiny gains keep resetting the patience counter and training crawls on long after it has flattened out
+MIN_DELTA = 1e-5
 LEARNING_RATE = 1e-3
 
 @dataclass(frozen = True)
 class Columns:
-    """Which columns a model reads: category columns, number columns, the label, and an optional weight."""
+    """The category columns, number columns, label, and optional weight that a model reads."""
 
     categories: list[str]
     numbers: list[str]
@@ -42,16 +43,16 @@ SEASON_AVG = Columns(
 )
 
 class PitchNet(nn.Module):
-    """Small neural network: a learned vector per category column, plus the numbers, through two hidden layers."""
+    """A small neural network that turns each category column into a learned vector, joins those with the numbers, and passes them through two hidden layers."""
 
     def __init__(self, n_values: list[int], n_numbers: int, hidden: int = 32) -> None:
         super().__init__()
         # One lookup table of trainable numbers per category column, min(4, values) wide. It has to be a
-        # ModuleList: tables in a plain list would never be trained
+        # ModuleList because tables in a plain list would never be trained
         self.embeddings = nn.ModuleList([nn.Embedding(n, min(4, n)) for n in n_values])
         width = sum(min(4, n) for n in n_values) + n_numbers
         self.layers = nn.Sequential(
-            # First layer's input size must equal the width of the glued row: every embedding plus the numbers
+            # The first layer's input size must equal the width of the glued row, which is every embedding plus the numbers
             nn.Linear(width, hidden),
             nn.ReLU(),
             nn.Linear(hidden, hidden),
@@ -79,7 +80,7 @@ class Model:
     seed: int
 
 def _category_codes(column: pd.Series, mapping: dict[str, int]) -> torch.Tensor:
-    """Turn a text column into integer codes using `mapping`. Internal helper for encode."""
+    """Turn a text column into integer codes using mapping. Internal helper for encode."""
 
     codes = column.astype(str).map(mapping)
     # A value missing from the mapping becomes NaN, which would turn into a garbage integer below
@@ -91,27 +92,26 @@ def _category_codes(column: pd.Series, mapping: dict[str, int]) -> torch.Tensor:
     return torch.tensor(codes.to_numpy(), dtype = torch.long)
 
 def encode(rows: pd.DataFrame, columns: Columns, category_maps: dict[str, dict[str, int]], means: pd.Series, stds: pd.Series) -> tuple[list[torch.Tensor], torch.Tensor]:
-    """Turn rows into (one code tensor per category column, standardized numbers). means/stds must come from the training rows."""
+    """Turn rows into one code tensor per category column plus the standardized numbers. The means and stds must come from the training rows."""
 
     category_idx = [_category_codes(rows[c], category_maps[c]) for c in columns.categories]
     numbers = torch.tensor(((rows[columns.numbers] - means) / stds).to_numpy(), dtype = torch.float32)
 
     return category_idx, numbers
 
-def baseline_type_average(train: pd.DataFrame, rows: pd.DataFrame) -> pd.Series:
-    """Predict each row's pitch type's pitch-weighted average run value per 100 in `train`."""
+def baseline_type_average(train: pd.DataFrame, rows: pd.DataFrame, columns: Columns = SEASON_AVG) -> pd.Series:
+    """Predict each row's label as the weighted average label of its pitch type in train."""
 
     types = train["pitch_type"].astype(str)
 
-    weighted_sum = (train[LABEL] * train[WEIGHT]).groupby(types).sum()
-    total_weight = train[WEIGHT].groupby(types).sum()
+    weight = pd.Series(_weights(train, columns).numpy(), index = train.index)
 
-    averages = weighted_sum / total_weight
+    averages = (train[columns.label] * weight).groupby(types).sum() / weight.groupby(types).sum()
 
     return rows["pitch_type"].astype(str).map(averages)
 
 def predict(model: Model, rows: pd.DataFrame) -> pd.Series:
-    """Return the model's predicted value for `rows` (in the units of its label), as a Series with the same index."""
+    """Return the model's predicted value for each of rows, in the units of its label, as a Series with the same index."""
 
     inputs = encode(rows, model.columns, model.category_maps, model.means, model.stds)
     model.net.eval()
@@ -129,19 +129,36 @@ def new_seed() -> int:
     return int(np.random.SeedSequence().entropy % 2 ** 32)
 
 def split_validation(train: pd.DataFrame, seed: int, fraction: float = 0.1) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Randomly set aside about `fraction` of `train` for validation. Returns (fit_rows, validation_rows)."""
+    """Randomly set aside about the given fraction of train for validation. Returns fit_rows and validation_rows."""
 
-    # One random number per row; rows below `fraction` become validation. Same seed -> same split
+    # One random number per row, and rows below fraction become validation. The same seed gives the same split
     is_validation = np.random.default_rng(seed).random(len(train)) < fraction
 
     return train[~is_validation], train[is_validation]
 
+def split_by_season(df: pd.DataFrame, test_seasons: list[int]) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Send rows from test_seasons to the test set and every other season to training. Returns train and test."""
+
+    is_test = df["season"].isin(test_seasons)
+
+    return df[~is_test], df[is_test]
+
+def weighted_rmse(pred: pd.Series, rows: pd.DataFrame, columns: Columns) -> float:
+    """The square root of the weighted mean squared error, in the units of the label. Lower is better."""
+
+    weight = _weights(rows, columns).numpy()
+
+    error = (pred.to_numpy() - rows[columns.label].to_numpy()) ** 2
+
+    return float(np.sqrt((weight * error).sum() / weight.sum()))
+
 def _weighted_mse(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    """Mean squared error where each row counts in proportion to its weight."""
 
     return (weight * (pred - target) ** 2).sum() / weight.sum()
 
 def _weights(rows: pd.DataFrame, columns: Columns) -> torch.Tensor:
-    """Each row's weight: the weight column if there is one, otherwise 1 for every row."""
+    """Each row's weight, which is the weight column if there is one and 1 for every row otherwise."""
 
     if columns.weight is None:
         return torch.ones(len(rows))
@@ -149,6 +166,7 @@ def _weights(rows: pd.DataFrame, columns: Columns) -> torch.Tensor:
     return torch.tensor(rows[columns.weight].to_numpy(), dtype = torch.float32)
 
 def fit(train: pd.DataFrame, columns: Columns = PITCH, kind: str = "mlp", seed: int | None = None) -> Model:
+    """Train a network on train and return it with everything predict needs. A random tenth of train is set aside to stop training once it stops improving. If seed is None, a fresh one is drawn."""
 
     if kind != "mlp":
         raise NotImplementedError("Only choice available is mlp")
@@ -186,6 +204,8 @@ def fit(train: pd.DataFrame, columns: Columns = PITCH, kind: str = "mlp", seed: 
     best_state = copy.deepcopy(net.state_dict())
     stale_epochs = 0
 
+    run_start = time.time()
+
     for epoch in range(MAX_EPOCHS):
         net.train()
         order = torch.randperm(len(fit_rows), generator = shuffler)
@@ -203,7 +223,9 @@ def fit(train: pd.DataFrame, columns: Columns = PITCH, kind: str = "mlp", seed: 
         with torch.no_grad():
             val_loss = _weighted_mse(net(*val_in), val_y, val_w).item()
 
-        if val_loss < best_loss:
+        logger.info("Epoch %d, validation loss %.4f, best %.4f, %.0f s", epoch + 1, val_loss, min(best_loss, val_loss), time.time() - run_start)
+
+        if val_loss < best_loss - MIN_DELTA:
             best_loss = val_loss
             best_state = copy.deepcopy(net.state_dict())
             stale_epochs = 0

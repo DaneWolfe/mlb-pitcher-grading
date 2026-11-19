@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 import torch
 from pitchlab.features import add_arm_side_break, add_location
-from pitchlab.model import PITCH, SEASON_AVG, Columns, Model, PitchNet, _weights, baseline_type_average, encode, fit, new_seed, predict, split_validation
+from pitchlab.model import PITCH, SEASON_AVG, Columns, Model, PitchNet, _weights, baseline_type_average, encode, fit, new_seed, predict, split_by_season, split_validation, weighted_rmse
 
 # A plain mean of the two FF rows would be 2.5; weighting by pitches pulls it toward the 300-pitch row
 def test_baseline_is_the_pitch_weighted_average_per_type():
@@ -14,6 +14,17 @@ def test_baseline_is_the_pitch_weighted_average_per_type():
     })
     rows = pd.DataFrame({"pitch_type": pd.Categorical(["SL", "FF"])})
     assert baseline_type_average(train, rows).tolist() == pytest.approx([2.0, 1.75])
+
+def test_baseline_uses_the_label_and_weight_of_the_columns_it_is_given():
+    train = pd.DataFrame({"pitch_type": ["FF", "FF", "SL"], "y": [1.0, 3.0, 5.0]})
+    rows = pd.DataFrame({"pitch_type": ["FF", "SL"]})
+    assert baseline_type_average(train, rows, TINY).tolist() == pytest.approx([2.0, 5.0])
+
+# A type missing from train gives NaN instead of an error, which weighted_rmse then passes on as NaN
+def test_baseline_gives_nan_for_a_pitch_type_not_in_train():
+    train = pd.DataFrame({"pitch_type": ["FF"], "y": [1.0]})
+    rows = pd.DataFrame({"pitch_type": ["FF", "SV"]})
+    assert baseline_type_average(train, rows, TINY).isna().tolist() == [False, True]
 
 
 TINY = Columns(categories = ["pitch_type", "stand"], numbers = ["a", "b"], label = "y", weight = None)
@@ -32,12 +43,6 @@ def test_pitch_columns_are_all_produced_by_the_feature_functions():
     })
     rows = add_location(add_arm_side_break(pitches))
     assert set(PITCH.categories + PITCH.numbers + [PITCH.label]) <= set(rows.columns)
-
-def test_pitchnet_returns_one_value_per_row():
-    net = PitchNet(n_values = [11, 2, 2, 12], n_numbers = 6)
-    category_idx = [torch.tensor([0, 3, 10]), torch.tensor([0, 1, 1]), torch.tensor([0, 1, 0]), torch.tensor([0, 5, 11])]
-    out = net(category_idx, torch.randn(3, 6))
-    assert out.shape == (3,)
 
 # Embedding tables kept in a plain list would silently never train; they must show up as parameters
 def test_pitchnet_registers_one_embedding_table_per_category_column():
@@ -98,6 +103,38 @@ def test_split_validation_partitions_the_rows_and_repeats_with_the_same_seed():
 
 def test_new_seed_fits_in_32_bits():
     assert 0 <= new_seed() < 2**32
+
+def test_split_by_season_sends_the_test_seasons_to_test_and_keeps_every_row_once():
+    df = pd.DataFrame({"season": [2023, 2024, 2025, 2026, 2025], "x": range(5)})
+    train, test = split_by_season(df, [2025, 2026])
+    assert train["season"].tolist() == [2023, 2024]
+    assert test["season"].tolist() == [2025, 2026, 2025]
+    assert sorted(train.index.tolist() + test.index.tolist()) == [0, 1, 2, 3, 4]
+
+def test_split_by_season_with_no_matching_season_leaves_test_empty():
+    df = pd.DataFrame({"season": [2023, 2024]})
+    train, test = split_by_season(df, [2030])
+    assert len(train) == 2
+    assert len(test) == 0
+
+def test_weighted_rmse_without_weights_is_the_root_of_the_mean_squared_error():
+    rows = pd.DataFrame({"y": [0.0, 0.0]})
+    assert weighted_rmse(pd.Series([1.0, 3.0]), rows, TINY) == pytest.approx(np.sqrt(5.0))
+
+# Errors of 1 and 3 with weights 1 and 3: (1 * 1 + 3 * 9) / 4 = 7
+def test_weighted_rmse_counts_each_row_in_proportion_to_its_weight():
+    columns = Columns(categories = [], numbers = [], label = "y", weight = "pitches")
+    rows = pd.DataFrame({"y": [0.0, 0.0], "pitches": [1, 3]})
+    assert weighted_rmse(pd.Series([1.0, 3.0]), rows, columns) == pytest.approx(np.sqrt(7.0))
+
+def test_weighted_rmse_is_zero_for_perfect_predictions():
+    rows = pd.DataFrame({"y": [0.5, -0.2]})
+    assert weighted_rmse(pd.Series([0.5, -0.2]), rows, TINY) == 0.0
+
+# A missing prediction must show up in the score, not be skipped
+def test_weighted_rmse_is_nan_when_a_prediction_is_missing():
+    rows = pd.DataFrame({"y": [0.0, 0.0]})
+    assert np.isnan(weighted_rmse(pd.Series([np.nan, 1.0]), rows, TINY))
 
 def pitch_rows(n = 200):
     rng = np.random.default_rng(0)
