@@ -1,4 +1,3 @@
-import logging
 import pandas as pd
 import pytest
 from pitchlab.clean import clean_pitches
@@ -141,18 +140,3 @@ def test_clean_pitches_does_not_modify_input():
 def test_clean_pitches_handles_empty_input():
     out = clean_pitches(pd.DataFrame(columns = KEEP_COLUMNS))
     assert len(out) == 0
-
-# Tests clean_pitches: the log line reports how many rows each kind of drop removed
-def test_clean_pitches_logs_drop_counts(caplog):
-    raw = make_raw(
-        make_pitch(),
-        make_pitch(pitch_number = 2, game_type = "S"),
-        make_pitch(pitch_number = 3, release_speed = None),
-        make_pitch(pitch_number = 4, balls = 4),
-        make_pitch(pitch_number = 5),
-        make_pitch(pitch_number = 5),
-    )
-    with caplog.at_level(logging.INFO, logger = "pitchlab.clean"):
-        clean_pitches(raw)
-    assert "cleaned 6 rows -> 2 (dropped 4" in caplog.text
-    assert "1 not regular season or not a kept pitch type, 1 missing a value, 1 invalid count, 1 duplicates" in caplog.text

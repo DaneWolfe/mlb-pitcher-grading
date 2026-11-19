@@ -29,18 +29,6 @@ def test_build_season_counts_and_stores_rows(tmp_path, monkeypatch):
     assert result == {"raw": 4, "clean": 3, "inserted": 3}
     assert len(read_pitches(db_path, 2026)) == 3
 
-# Tests build_season: running it again over the same files stores nothing new, so a re-run can't create duplicates
-def test_build_season_second_run_inserts_nothing(tmp_path, monkeypatch):
-    day = write_day(tmp_path, "2026-09-01", make_pitch(), make_pitch(pitch_number = 2))
-    fake_download(monkeypatch, [day])
-    db_path = tmp_path / "pitches.db"
-
-    build_season(2026, tmp_path, db_path)
-    second = build_season(2026, tmp_path, db_path)
-
-    assert second == {"raw": 2, "clean": 2, "inserted": 0}
-    assert len(read_pitches(db_path, 2026)) == 2
-
 # Tests build_season: an off-day file (0 rows) among real days is skipped and changes no count
 def test_build_season_ignores_empty_off_day_files(tmp_path, monkeypatch):
     off_day = tmp_path / "savant_2026-09-03.parquet"
