@@ -10,47 +10,70 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-FEATURES = ["pitch_type", "p_throws", "velo_mph", "spin_rpm", "ivb_in", "hb_arm_in"]
 LABEL = "run_value_per100"
 WEIGHT = "pitches"
-NUMBERS = ["velo_mph", "spin_rpm", "ivb_in", "hb_arm_in"]
 
 BATCH_SIZE = 256
 MAX_EPOCHS = 300
 PATIENCE = 20
 LEARNING_RATE = 1e-3
 
-class PitchNet(nn.Module):
-    """Small neural network: learned vectors for pitch type and hand, plus four numbers, through two hidden layers."""
+@dataclass(frozen = True)
+class Columns:
+    """Which columns a model reads: category columns, number columns, the label, and an optional weight."""
 
-    def __init__(self, n_types: int, n_hands: int = 2, n_numbers: int = 4, hidden: int = 32) -> None:
+    categories: list[str]
+    numbers: list[str]
+    label: str
+    weight: str | None
+
+PITCH = Columns(
+    categories = ["pitch_type", "p_throws", "stand", "count"],
+    numbers = ["velo_mph", "spin_rpm", "ivb_in", "hb_arm_in", "plate_x_away_in", "zone_height"],
+    label = "run_value",
+    weight = None
+)
+
+SEASON_AVG = Columns(
+    categories = ["pitch_type", "p_throws"],
+    numbers = ["velo_mph", "spin_rpm", "ivb_in", "hb_arm_in"],
+    label = "run_value_per100",
+    weight = "pitches"
+)
+
+class PitchNet(nn.Module):
+    """Small neural network: a learned vector per category column, plus the numbers, through two hidden layers."""
+
+    def __init__(self, n_values: list[int], n_numbers: int, hidden: int = 32) -> None:
         super().__init__()
-        # Each embedding is a lookup table of trainable numbers: 4 per pitch type, 2 per hand
-        self.type_embedding = nn.Embedding(n_types, 4)
-        self.hand_embedding = nn.Embedding(n_hands, 2)
+        # One lookup table of trainable numbers per category column, min(4, values) wide. It has to be a
+        # ModuleList: tables in a plain list would never be trained
+        self.embeddings = nn.ModuleList([nn.Embedding(n, min(4, n)) for n in n_values])
+        width = sum(min(4, n) for n in n_values) + n_numbers
         self.layers = nn.Sequential(
-            # First layer's input size must equal the width of the glued row: 4 + 2 + the numbers
-            nn.Linear(4 + 2 + n_numbers, hidden),
+            # First layer's input size must equal the width of the glued row: every embedding plus the numbers
+            nn.Linear(width, hidden),
             nn.ReLU(),
             nn.Linear(hidden, hidden),
             nn.ReLU(),
             nn.Linear(hidden, 1)
         )
 
-    def forward(self, type_idx: torch.Tensor, hand_idx: torch.Tensor, numbers: torch.Tensor) -> torch.Tensor:
-        """Predict a run value per 100 for each row of a batch."""
+    def forward(self, category_idx: list[torch.Tensor], numbers: torch.Tensor) -> torch.Tensor:
+        """Predict a value for each row of a batch."""
 
-        x = torch.cat([self.type_embedding(type_idx), self.hand_embedding(hand_idx), numbers], dim = 1)
+        vectors = [embedding(idx) for embedding, idx in zip(self.embeddings, category_idx)]
+        x = torch.cat(vectors + [numbers], dim = 1)
         # The last layer gives shape (batch, 1); squeeze(1) flattens it to (batch,) to match the labels
         return self.layers(x).squeeze(1)
 
 @dataclass
 class Model:
-    """A trained network plus the maps, means, stds and seed that predict() needs."""
+    """A trained network plus the columns, maps, means, stds, and seed that predict() needs."""
 
     net: PitchNet
-    type_map: dict[str, int]
-    hand_map: dict[str, int]
+    columns: Columns
+    category_maps: dict[str, dict[str, int]]
     means: pd.Series
     stds: pd.Series
     seed: int
@@ -67,14 +90,13 @@ def _category_codes(column: pd.Series, mapping: dict[str, int]) -> torch.Tensor:
 
     return torch.tensor(codes.to_numpy(), dtype = torch.long)
 
-def encode(rows: pd.DataFrame, type_map: dict[str, int], hand_map: dict[str, int], means: pd.Series, stds: pd.Series) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    """Turn rows into (type codes, hand codes, standardized numbers). means/stds must come from the training rows."""
+def encode(rows: pd.DataFrame, columns: Columns, category_maps: dict[str, dict[str, int]], means: pd.Series, stds: pd.Series) -> tuple[list[torch.Tensor], torch.Tensor]:
+    """Turn rows into (one code tensor per category column, standardized numbers). means/stds must come from the training rows."""
 
-    type_idx = _category_codes(rows["pitch_type"], type_map)
-    hand_idx = _category_codes(rows["p_throws"], hand_map)
-    numbers = torch.tensor(((rows[NUMBERS] - means) / stds).to_numpy(), dtype = torch.float32)
+    category_idx = [_category_codes(rows[c], category_maps[c]) for c in columns.categories]
+    numbers = torch.tensor(((rows[columns.numbers] - means) / stds).to_numpy(), dtype = torch.float32)
 
-    return type_idx, hand_idx, numbers
+    return category_idx, numbers
 
 def baseline_type_average(train: pd.DataFrame, rows: pd.DataFrame) -> pd.Series:
     """Predict each row's pitch type's pitch-weighted average run value per 100 in `train`."""
@@ -89,9 +111,9 @@ def baseline_type_average(train: pd.DataFrame, rows: pd.DataFrame) -> pd.Series:
     return rows["pitch_type"].astype(str).map(averages)
 
 def predict(model: Model, rows: pd.DataFrame) -> pd.Series:
-    """Return the model's predicted run value per 100 for `rows`, as a Series with the same index."""
+    """Return the model's predicted value for `rows` (in the units of its label), as a Series with the same index."""
 
-    inputs = encode(rows, model.type_map, model.hand_map, model.means, model.stds)
+    inputs = encode(rows, model.columns, model.category_maps, model.means, model.stds)
     model.net.eval()
 
     # no_grad skips the bookkeeping PyTorch keeps for training; predicting doesn't need it
@@ -118,7 +140,15 @@ def _weighted_mse(pred: torch.Tensor, target: torch.Tensor, weight: torch.Tensor
 
     return (weight * (pred - target) ** 2).sum() / weight.sum()
 
-def fit(train: pd.DataFrame, kind: str = "mlp", seed: int | None = None) -> Model:
+def _weights(rows: pd.DataFrame, columns: Columns) -> torch.Tensor:
+    """Each row's weight: the weight column if there is one, otherwise 1 for every row."""
+
+    if columns.weight is None:
+        return torch.ones(len(rows))
+
+    return torch.tensor(rows[columns.weight].to_numpy(), dtype = torch.float32)
+
+def fit(train: pd.DataFrame, columns: Columns = PITCH, kind: str = "mlp", seed: int | None = None) -> Model:
 
     if kind != "mlp":
         raise NotImplementedError("Only choice available is mlp")
@@ -129,24 +159,26 @@ def fit(train: pd.DataFrame, kind: str = "mlp", seed: int | None = None) -> Mode
 
     torch.manual_seed(seed)
 
-    type_map = {t: i for i, t in enumerate(sorted(train["pitch_type"].astype(str).unique()))}
-    hand_map = {h: i for i, h in enumerate(sorted(train["p_throws"].astype(str).unique()))}
+    category_maps = {
+        c: {v: i for i, v in enumerate(sorted(train[c].astype(str).unique()))}
+        for c in columns.categories
+    }
 
-    means = train[NUMBERS].mean()
-    stds = train[NUMBERS].std()
+    means = train[columns.numbers].mean()
+    stds = train[columns.numbers].std()
 
     fit_rows, val_rows = split_validation(train, seed)
 
-    fit_in = encode(fit_rows, type_map, hand_map, means, stds)
-    val_in = encode(val_rows, type_map, hand_map, means, stds)
+    fit_in = encode(fit_rows, columns, category_maps, means, stds)
+    val_in = encode(val_rows, columns, category_maps, means, stds)
 
-    fit_y = torch.tensor(fit_rows[LABEL].to_numpy(), dtype = torch.float32)
-    fit_w = torch.tensor(fit_rows[WEIGHT].to_numpy(), dtype = torch.float32)
+    fit_y = torch.tensor(fit_rows[columns.label].to_numpy(), dtype = torch.float32)
+    fit_w = _weights(fit_rows, columns)
 
-    val_y = torch.tensor(val_rows[LABEL].to_numpy(), dtype = torch.float32)
-    val_w = torch.tensor(val_rows[WEIGHT].to_numpy(), dtype = torch.float32)
+    val_y = torch.tensor(val_rows[columns.label].to_numpy(), dtype = torch.float32)
+    val_w = _weights(val_rows, columns)
 
-    net = PitchNet(n_types = len(type_map), n_hands = len(hand_map))
+    net = PitchNet([len(category_maps[c]) for c in columns.categories], len(columns.numbers))
     optimizer = torch.optim.Adam(net.parameters(), lr = LEARNING_RATE)
     shuffler = torch.Generator().manual_seed(seed)
 
@@ -160,7 +192,7 @@ def fit(train: pd.DataFrame, kind: str = "mlp", seed: int | None = None) -> Mode
 
         for start in range(0, len(order), BATCH_SIZE):
             idx = order[start:start + BATCH_SIZE]
-            pred = net(fit_in[0][idx], fit_in[1][idx], fit_in[2][idx])
+            pred = net([c[idx] for c in fit_in[0]], fit_in[1][idx])
             loss = _weighted_mse(pred, fit_y[idx], fit_w[idx])
 
             optimizer.zero_grad()
@@ -183,4 +215,4 @@ def fit(train: pd.DataFrame, kind: str = "mlp", seed: int | None = None) -> Mode
     net.load_state_dict(best_state)
     logger.info("Stopped after %d epochs, best validation loss: %.4f", epoch + 1, best_loss)
 
-    return Model(net, type_map, hand_map, means, stds, seed)
+    return Model(net, columns, category_maps, means, stds, seed)

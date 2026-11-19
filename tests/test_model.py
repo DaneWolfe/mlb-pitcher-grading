@@ -2,7 +2,8 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
-from pitchlab.model import NUMBERS, Model, PitchNet, baseline_type_average, encode, fit, new_seed, predict, split_validation
+from pitchlab.features import add_arm_side_break, add_location
+from pitchlab.model import PITCH, SEASON_AVG, Columns, Model, PitchNet, _weights, baseline_type_average, encode, fit, new_seed, predict, split_validation
 
 # A plain mean of the two FF rows would be 2.5; weighting by pitches pulls it toward the 300-pitch row
 def test_baseline_is_the_pitch_weighted_average_per_type():
@@ -15,52 +16,70 @@ def test_baseline_is_the_pitch_weighted_average_per_type():
     assert baseline_type_average(train, rows).tolist() == pytest.approx([2.0, 1.75])
 
 
+TINY = Columns(categories = ["pitch_type", "stand"], numbers = ["a", "b"], label = "y", weight = None)
+
+def make_rows(types, stands):
+    n = len(types)
+    return pd.DataFrame({"pitch_type": types, "stand": stands, "a": [1.0] * n, "b": [10.0] * n})
+
+# Both models use the same column names the feature functions produce, so a rename in one place is caught
+def test_pitch_columns_are_all_produced_by_the_feature_functions():
+    pitches = pd.DataFrame({
+        "p_throws": ["R", "L"], "stand": ["L", "R"], "hb_in": [-7.0, 8.0],
+        "plate_x_in": [3.0, -3.0], "plate_z_in": [30.0, 30.0], "sz_top_in": [42.0, 42.0], "sz_bot_in": [18.0, 18.0],
+        "balls": [1, 3], "strikes": [2, 2], "pitch_type": ["FF", "SL"], "velo_mph": [95.0, 85.0],
+        "spin_rpm": [2300.0, 2500.0], "ivb_in": [16.0, 2.0], "run_value": [0.1, -0.1],
+    })
+    rows = add_location(add_arm_side_break(pitches))
+    assert set(PITCH.categories + PITCH.numbers + [PITCH.label]) <= set(rows.columns)
+
 def test_pitchnet_returns_one_value_per_row():
-    net = PitchNet(n_types=11)
-    out = net(torch.tensor([0, 3, 10]), torch.tensor([0, 1, 1]), torch.randn(3, 4))
+    net = PitchNet(n_values = [11, 2, 2, 12], n_numbers = 6)
+    category_idx = [torch.tensor([0, 3, 10]), torch.tensor([0, 1, 1]), torch.tensor([0, 1, 0]), torch.tensor([0, 5, 11])]
+    out = net(category_idx, torch.randn(3, 6))
     assert out.shape == (3,)
 
-
-def _rows(types, hands):
-    n = len(types)
-    return pd.DataFrame({
-        "pitch_type": types,
-        "p_throws": hands,
-        "velo_mph": [90.0] * n,
-        "spin_rpm": [2200.0] * n,
-        "ivb_in": [10.0] * n,
-        "hb_arm_in": [-8.0] * n,
-    })
-
+# Embedding tables kept in a plain list would silently never train; they must show up as parameters
+def test_pitchnet_registers_one_embedding_table_per_category_column():
+    net = PitchNet(n_values = [11, 2, 12], n_numbers = 4)
+    shapes = [tuple(p.shape) for p in net.parameters()]
+    assert (11, 4) in shapes
+    assert (2, 2) in shapes
+    assert (12, 4) in shapes
 
 # The means and stds passed in are used as given, never recomputed from the rows being encoded
 def test_encode_standardizes_with_the_given_means_and_stds():
-    means = pd.Series([88.0, 2000.0, 12.0, -6.0], index=NUMBERS)
-    stds = pd.Series([2.0, 100.0, 4.0, 2.0], index=NUMBERS)
-    type_idx, hand_idx, numbers = encode(_rows(["SL", "FF"], ["L", "R"]), {"FF": 0, "SL": 1}, {"R": 0, "L": 1}, means, stds)
-    assert type_idx.tolist() == [1, 0]
-    assert hand_idx.tolist() == [1, 0]
-    assert numbers[0].tolist() == pytest.approx([1.0, 2.0, -0.5, -1.0])
+    means = pd.Series([0.0, 4.0], index = ["a", "b"])
+    stds = pd.Series([2.0, 3.0], index = ["a", "b"])
+    maps = {"pitch_type": {"FF": 0, "SL": 1}, "stand": {"R": 0, "L": 1}}
+    category_idx, numbers = encode(make_rows(["SL", "FF"], ["L", "R"]), TINY, maps, means, stds)
+    assert [c.tolist() for c in category_idx] == [[1, 0], [1, 0]]
+    assert numbers[0].tolist() == pytest.approx([0.5, 2.0])
 
+def test_encode_rejects_a_value_not_seen_in_training():
+    means = pd.Series([0.0, 0.0], index = ["a", "b"])
+    stds = pd.Series([1.0, 1.0], index = ["a", "b"])
+    maps = {"pitch_type": {"FF": 0}, "stand": {"R": 0}}
+    with pytest.raises(ValueError, match = "not seen in training"):
+        encode(make_rows(["FF", "SV"], ["R", "R"]), TINY, maps, means, stds)
 
-def test_encode_rejects_a_pitch_type_not_seen_in_training():
-    means = pd.Series([0.0] * 4, index=NUMBERS)
-    stds = pd.Series([1.0] * 4, index=NUMBERS)
-    with pytest.raises(ValueError, match="not seen in training"):
-        encode(_rows(["FF", "SV"], ["R", "R"]), {"FF": 0}, {"R": 0}, means, stds)
-
+def test_weights_are_all_ones_without_a_weight_column_and_the_column_otherwise():
+    rows = pd.DataFrame({"pitches": [30, 120]})
+    assert _weights(rows, TINY).tolist() == [1.0, 1.0]
+    weighted = Columns(categories = [], numbers = [], label = "y", weight = "pitches")
+    assert _weights(rows, weighted).tolist() == [30.0, 120.0]
 
 def test_predict_returns_one_value_per_row_with_the_rows_index():
     torch.manual_seed(0)
     model = Model(
-        net=PitchNet(n_types=2),
-        type_map={"FF": 0, "SL": 1},
-        hand_map={"R": 0, "L": 1},
-        means=pd.Series([90.0, 2200.0, 10.0, -8.0], index=NUMBERS),
-        stds=pd.Series([2.0, 100.0, 4.0, 2.0], index=NUMBERS),
-        seed=0,
+        net = PitchNet(n_values = [2, 2], n_numbers = 2),
+        columns = TINY,
+        category_maps = {"pitch_type": {"FF": 0, "SL": 1}, "stand": {"R": 0, "L": 1}},
+        means = pd.Series([0.0, 0.0], index = ["a", "b"]),
+        stds = pd.Series([1.0, 1.0], index = ["a", "b"]),
+        seed = 0,
     )
-    rows = _rows(["FF", "SL"], ["R", "L"])
+    rows = make_rows(["FF", "SL"], ["R", "L"])
     rows.index = [5, 7]
     out = predict(model, rows)
     assert out.index.tolist() == [5, 7]
@@ -80,9 +99,24 @@ def test_split_validation_partitions_the_rows_and_repeats_with_the_same_seed():
 def test_new_seed_fits_in_32_bits():
     assert 0 <= new_seed() < 2**32
 
-
-def _train_rows(n=200):
+def pitch_rows(n = 200):
     rng = np.random.default_rng(0)
+    return pd.DataFrame({
+        "pitch_type": rng.choice(["FF", "SL", "CH"], n),
+        "p_throws": rng.choice(["R", "L"], n),
+        "stand": rng.choice(["R", "L"], n),
+        "count": rng.choice(["0-0", "1-2", "3-2"], n),
+        "velo_mph": rng.normal(90, 3, n),
+        "spin_rpm": rng.normal(2300, 150, n),
+        "ivb_in": rng.normal(12, 4, n),
+        "hb_arm_in": rng.normal(6, 4, n),
+        "plate_x_away_in": rng.normal(0, 8, n),
+        "zone_height": rng.normal(0.5, 0.4, n),
+        "run_value": rng.normal(0, 0.2, n),
+    })
+
+def season_rows(n = 200):
+    rng = np.random.default_rng(1)
     return pd.DataFrame({
         "pitch_type": rng.choice(["FF", "SL", "CH"], n),
         "p_throws": rng.choice(["R", "L"], n),
@@ -97,18 +131,48 @@ def _train_rows(n=200):
 
 # Weight init, the validation split and batch order must all come from the seed, or runs can't be repeated
 def test_fit_with_the_same_seed_gives_the_same_predictions():
-    train = _train_rows()
-    first = fit(train, seed=7)
-    second = fit(train, seed=7)
+    train = pitch_rows()
+    first = fit(train, seed = 7)
+    second = fit(train, seed = 7)
     assert first.seed == 7
     assert predict(first, train).tolist() == pytest.approx(predict(second, train).tolist())
 
-
 def test_fit_without_a_seed_draws_one_and_stores_it():
-    model = fit(_train_rows(), seed=None)
+    model = fit(pitch_rows(), seed = None)
     assert 0 <= model.seed < 2**32
-
 
 def test_fit_rejects_a_kind_other_than_mlp():
     with pytest.raises(NotImplementedError):
-        fit(_train_rows(), kind="gbm")
+        fit(pitch_rows(), kind = "gbm")
+
+def test_fit_uses_the_pitch_columns_by_default_and_builds_a_map_per_category():
+    model = fit(pitch_rows(), seed = 1)
+    assert model.columns == PITCH
+    assert set(model.category_maps) == set(PITCH.categories)
+    assert sorted(model.category_maps["count"]) == ["0-0", "1-2", "3-2"]
+    assert sorted(model.category_maps["pitch_type"]) == ["CH", "FF", "SL"]
+
+def test_fit_works_with_the_weighted_season_average_columns():
+    train = season_rows()
+    model = fit(train, columns = SEASON_AVG, seed = 1)
+    assert model.columns == SEASON_AVG
+    out = predict(model, train)
+    assert len(out) == len(train)
+    assert out.notna().all()
+
+def test_predict_after_fit_rejects_a_count_never_seen_in_training():
+    model = fit(pitch_rows(), seed = 1)
+    rows = pitch_rows(5)
+    rows["count"] = "2-2"
+    with pytest.raises(ValueError, match = "not seen in training"):
+        predict(model, rows)
+
+# Without this, a fit that returned an untrained network would pass every other test: they only check
+# shapes, seeds and names. Here run value follows velocity, so a trained model must track it
+def test_fit_learns_a_relationship_that_is_in_the_data():
+    train = pitch_rows(3000)
+    noise = np.random.default_rng(5).normal(0, 0.02, len(train))
+    train["run_value"] = 0.1 * (train["velo_mph"] - 90) + noise
+    model = fit(train, seed = 3)
+    predicted = predict(model, train)
+    assert np.corrcoef(predicted, train["run_value"])[0, 1] > 0.9
