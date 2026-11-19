@@ -53,7 +53,7 @@ Open items:
 | `pfx_z`             | **feet**    | Vertical movement                                           |
 | `stand`             | `L` / `R`   | Batter's side for this pitch (a switch hitter's side varies) |
 | `balls`, `strikes`  | int         | Count before the pitch: balls 0-3, strikes 0-2              |
-| `plate_x`           | **feet**    | Horizontal position where the pitch crossed the front of the plate; 0 = middle. Sign to be checked (below) |
+| `plate_x`           | **feet**    | Horizontal position where the pitch crossed the front of the plate; 0 = middle. Positive is the first-base side (below) |
 | `plate_z`           | **feet**    | Height above the ground at the plate                        |
 | `sz_top`, `sz_bot`  | **feet**    | Top and bottom of this batter's strike zone, set per pitch  |
 | `description`       | text        | Pitch result (ball, called_strike, swinging_strike, foul, hit_into_play, ...) |
@@ -68,10 +68,14 @@ so the saved daily files do not contain them.
 Savant's `zone` column (a 1-14 zone number) is not kept, because it can be computed from
 `plate_x`, `plate_z` and the zone edges.
 
-Open checks on the location and count columns, before the model uses them:
-- The sign of `plate_x`: whether positive is the first-base or the third-base side. Statcast
-  describes it from the catcher's view; this has not been checked against the data. The mirroring
-  for left-handed batters depends on it.
+The sign of `plate_x` is positive toward the first-base side (the catcher's right). On the stored
+pitches the mean `plate_x_in` is +2.2 for right-handed batters and -1.9 for left-handed batters,
+because pitchers throw away from the batter more often than inside. Right-handed pitchers'
+sliders and cutters, which move to the glove side, average +5.1 and +4.5 inches and their sinkers
+-2.6, and left-handed pitchers show the mirror image. The mirroring for left-handed batters in
+`features.py` relies on this.
+
+Open checks on the location and count columns:
 - How many pitches lack location or zone edges, and whether that loss is concentrated anywhere
   (as with the 2017-2019 sliders below).
 - Whether `balls` and `strikes` ever fall outside 0-3 and 0-2.

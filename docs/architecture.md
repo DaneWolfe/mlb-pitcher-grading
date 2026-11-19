@@ -21,7 +21,9 @@ pipeline fails.
 ### Pipeline
 Python script (`pitchlab.pipeline`) that downloads, cleans, stores, builds features, trains and
 scores. It runs and exits; each step is safe to re-run. Built so far: download, clean and store
-(`python -m pitchlab.pipeline build`). Features, training and scoring come in Phase 2.
+(`python -m pitchlab.pipeline build`), the location and count features (`features.py`), and the
+model with its training (`model.py`, run by `python -m pitchlab.train`). Scoring pitchers and
+storing the results come next.
 
 ### Storage
 - **Raw downloads:** Parquet, one file per day under `data/raw/`. Compact, typed, and lets an
@@ -66,12 +68,15 @@ page (one line per pitch), all reading from the API.
 4. **Model:** a small PyTorch neural network.
    - Inputs: each category as a learned embedding (a small trainable vector per value); the
      numbers standardized with the training seasons' mean and standard deviation.
-   - Network: two hidden layers of 32 to 64 units.
+   - Network: two hidden layers of 32 units.
    - Training: mean squared error, Adam optimizer, mini-batches, and early stopping on a
      validation split taken from the training seasons. The random seed is drawn fresh each run,
      then logged and saved with the results, so any run can be reproduced exactly.
-   - Comparison: a baseline that predicts each pitch type's average run value in each count,
-     which the model must beat.
+   - Comparison: a baseline that predicts each pitch type's average run value, which the model
+     must beat.
+   - Run: `pitchlab.train` trains on every season except 2025 and 2026, prints the network's and
+     the baseline's error (root mean squared error per pitch) on those two seasons, and saves the
+     model to `data/model.pkl`. The file is a Python pickle, so only load one you made yourself.
 5. **Outputs:**
    - **Pitch-type score:** the average predicted run value per 100 pitches of each pitch type a
      pitcher threw in a season (for the pitcher page and "top pitches").

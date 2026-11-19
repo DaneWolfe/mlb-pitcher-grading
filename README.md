@@ -22,7 +22,7 @@ value. A single pitch is noisy, but over millions of pitches the model learns wh
 in a given spot and count, is worth on average.
 
 **The model.** A small PyTorch neural network. It has to beat a simple baseline (each pitch type's
-average run value in each count).
+average run value).
 
 **Pitchers are ranked by their pitches.** The main score is cumulative: the predicted run value of
 every pitch he threw, summed over the season. It rewards both quality and workload. Shown next to
@@ -90,7 +90,12 @@ setup, if you need to match them.
 ```powershell
 python -m pitchlab.pipeline build              # every season: 2017-2019 and 2021-2026
 python -m pitchlab.pipeline build --year 2025  # one season
+python -m pitchlab.train                       # train on 2017-2024, test on 2025-2026
 ```
+
+`train` fits the model on every season except 2025 and 2026, prints its error and the pitch-type
+baseline's error on those two seasons, and saves the model to `data/model.pkl`. The file is a
+Python pickle, so only load one you made yourself.
 
 For each season, `build` downloads every day from March 15 to October 10 from Baseball Savant
 into `data/raw/` (one file per day), cleans the pitches (see [docs/data.md](docs/data.md)) and
