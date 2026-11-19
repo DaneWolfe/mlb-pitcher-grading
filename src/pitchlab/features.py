@@ -19,6 +19,28 @@ def add_arm_side_break(pitches: pd.DataFrame) -> pd.DataFrame:
     df["hb_arm_in"] = (df["hb_in"] * sign.astype("float32")).astype("float32")
     return df
 
+def add_location(pitches: pd.DataFrame) -> pd.DataFrame:
+    """Return a copy of pitches with plate_x_away_in, zone_height, and count added."""
+
+    df = pitches.copy()
+
+    sign = df["stand"].map({
+        "R": 1,
+        "L": -1
+    })
+    bad_rows = int(sign.isna().sum())
+    if bad_rows > 0:
+        raise ValueError(f"{bad_rows} rows have a stand other than L or R")
+
+    df["plate_x_away_in"] = (df["plate_x_in"] * sign.astype("float32")).astype("float32")
+
+    zone_size = df["sz_top_in"] - df["sz_bot_in"]
+    df["zone_height"] = ((df["plate_z_in"] - df["sz_bot_in"]) / zone_size).astype("float32")
+
+    df["count"] = df["balls"].astype(str) + "-" + df["strikes"].astype(str)
+
+    return df
+
 def build_pitch_seasons(pitches: pd.DataFrame) -> pd.DataFrame:
     """Return one row per (pitcher, season, pitch type) with at least MIN_PITCH_TYPE_PITCHES pitches."""
 
