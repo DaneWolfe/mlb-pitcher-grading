@@ -26,7 +26,7 @@ Sample request, 2026-09-01: 4,681 rows, 119 columns, about 3.2 MB. Pitch type, s
 movement are blank on 11 rows (0.2%). Pitch codes present: FF, SI, CH, SL, ST, CU, FC, FS, KC, EP, SV.
 
 Volume: 179 to 185 game days per season, 2-3 MB per day of raw CSV. Only the kept columns
-(below) are saved, so all nine seasons take about 105 MB as Parquet files.
+(below) are saved as Parquet files; the total size for all nine seasons has not been measured yet.
 
 The pipeline requests one day at a time, pauses 1.1 seconds after each request, and tries a
 failed day up to 3 times with growing waits (settings in `config.py`).
@@ -51,6 +51,11 @@ Open items:
 | `release_spin_rate` | rpm         |                                                             |
 | `pfx_x`             | **feet**    | Horizontal movement; sign depends on handedness (below)     |
 | `pfx_z`             | **feet**    | Vertical movement                                           |
+| `stand`             | `L` / `R`   | Batter's side for this pitch (a switch hitter's side varies) |
+| `balls`, `strikes`  | int         | Count before the pitch: balls 0-3, strikes 0-2              |
+| `plate_x`           | **feet**    | Horizontal position where the pitch crossed the front of the plate; 0 = middle. Sign to be checked (below) |
+| `plate_z`           | **feet**    | Height above the ground at the plate                        |
+| `sz_top`, `sz_bot`  | **feet**    | Top and bottom of this batter's strike zone, set per pitch  |
 | `description`       | text        | Pitch result (ball, called_strike, swinging_strike, foul, hit_into_play, ...) |
 | `events`            | text        | Plate-appearance result on the final pitch (strikeout, field_out, single, home_run, ...) |
 | `bb_type`           | text        | Batted-ball type on balls in play: ground_ball, fly_ball, line_drive, popup |
@@ -60,10 +65,19 @@ The last three text columns (`description`, `events`, `bb_type`) were read from 
 sample only, to check what run value measures (see "Run value"). The pipeline does not keep them,
 so the saved daily files do not contain them.
 
-The file also has location columns (`plate_x`, `plate_z`, `zone`, `sz_top`, `sz_bot`) and the
-count (`balls`, `strikes`). They are deliberately not kept: whether a pitch off the plate was a
-purposeful ball or a miss cannot be told from the data, and the scores are meant to describe the
-pitches themselves.
+Savant's `zone` column (a 1-14 zone number) is not kept, because it can be computed from
+`plate_x`, `plate_z` and the zone edges.
+
+Open checks on the location and count columns, before the model uses them:
+- The sign of `plate_x`: whether positive is the first-base or the third-base side. Statcast
+  describes it from the catcher's view; this has not been checked against the data. The mirroring
+  for left-handed batters depends on it.
+- How many pitches lack location or zone edges, and whether that loss is concentrated anywhere
+  (as with the 2017-2019 sliders below).
+- Whether `balls` and `strikes` ever fall outside 0-3 and 0-2.
+- That run value depends on the count: the mean run value of a ball in 3-2 should be far more
+  negative than a ball in 0-0. Savant computes it from count-based run expectancy; not yet checked
+  here.
 
 ## Pitch types
 
@@ -173,6 +187,9 @@ model, so a loss that is concentrated in one kind of pitch would bias it. Counte
 seasons, from the daily files before and after cleaning. Every downloaded row is a
 regular-season pitch (`hfGT=R`), and no season has duplicate pitches.
 
+The table does not yet include pitches dropped for a missing location, zone edge or count, or an
+invalid count; those columns are listed under "Open checks" above.
+
 | Season | Downloaded | Kept    | Dropped | Share  | Pitch type blank or dropped | Missing a value |
 |--------|------------|---------|---------|--------|-----------------------------|-----------------|
 | 2017   | 724,627    | 703,150 | 21,477  | 2.96%  | 9,661                       | 11,816          |
@@ -231,8 +248,10 @@ The rows are left as they are. Open check for the model phase: train with and wi
 
 Counted in regular-season pitches (innings are not a column in the pitch file):
 
-- **Model rows: at least 30 pitches** of a pitch type in a season. Every pitcher counts,
-  relievers included. Rows are weighted by pitch count, so small rows have little influence.
+- **Model rows:** every cleaned pitch, from every pitcher, relievers included. No cutoff.
+- **Pitch-type scores: at least 30 pitches** of a pitch type in a season, for the per-pitch-type
+  lines on the pitcher page and the "top pitches" list. Fewer pitches than that and the average
+  is mostly noise.
 - **Rankings: at least 1,850 pitches** in the season (about 115 innings). Keeps relievers out of
   the starter rankings.
 
@@ -306,8 +325,8 @@ https://baseballsavant.mlb.com/leaderboard/pitch-arsenal-stats
   ?type=pitcher&pitchType=&year=2026&team=&min=100&csv=true
 ```
 
-Its per-pitch-type rows match this project's unit, so it is the main spot-check for the
-`pitch_seasons` table (planned for Phase 2: one row per pitcher, season and pitch type). Its sign convention has not yet been compared with sums of
+Its per-pitch-type rows match this project's pitch-type scores (one row per pitcher, season and
+pitch type), so it is the main spot-check for them. Its sign convention has not yet been compared with sums of
 `delta_pitcher_run_exp`; check this before relying on it. Its pitch counts run well below season
 totals, so it cannot be used to count qualifiers.
 
@@ -315,7 +334,7 @@ totals, so it cannot be used to count qualifiers.
 
 - Raw downloads: one Parquet file per day under `data/raw/`, named `savant_YYYY-MM-DD.parquet`.
   Days with no games are saved as empty files so they are not requested again. Not committed.
-- Database: `data/pitches.db`, SQLite, about 605 MB with all nine seasons. Not committed.
+- Database: `data/pitches.db`, SQLite. Not committed.
 
 More tables are added here as they are implemented.
 
@@ -340,6 +359,13 @@ per season are the "Kept" column under "Cleaning losses".
 | `ivb_in`        | REAL    | `pfx_z`                 | Inches (feet x 12)                            |
 | `run_value`     | REAL    | `delta_pitcher_run_exp` | Positive is good for the pitcher              |
 | `season`        | INTEGER | year of `game_date`     |                                               |
+| `stand`         | TEXT    | `stand`                 | Batter's side, `L` or `R`                     |
+| `balls`         | INTEGER | `balls`                 | 0-3, before the pitch                         |
+| `strikes`       | INTEGER | `strikes`               | 0-2, before the pitch                         |
+| `plate_x_in`    | REAL    | `plate_x`               | Inches (feet x 12). Not yet mirrored by batter side |
+| `plate_z_in`    | REAL    | `plate_z`               | Inches (feet x 12)                            |
+| `sz_top_in`     | REAL    | `sz_top`                | Inches (feet x 12)                            |
+| `sz_bot_in`     | REAL    | `sz_bot`                | Inches (feet x 12)                            |
 
 `game_date` and `game_type` are dropped after cleaning: every row is regular season, and the
 date is only needed to get the season.

@@ -7,9 +7,8 @@ ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT / "data"
 DB_PATH = DATA_DIR / "pitches.db"
 
-# Columns kept from the Savant CSV. Location (plate_x, plate_z, zone) and count columns are left
-# out on purpose: the model grades the pitch itself, and a ball thrown on purpose can't be told
-# apart from a miss. They still count inside delta_pitcher_run_exp, the label.
+# Columns kept from the Savant CSV. Location and count are kept because a pitch's value depends on
+# where it crossed the plate and on the count it was thrown in.
 KEEP_COLUMNS = [
     "game_date",
     "game_pk",
@@ -25,6 +24,13 @@ KEEP_COLUMNS = [
     "pfx_x",
     "pfx_z",
     "delta_pitcher_run_exp",
+    "stand",
+    "balls",
+    "strikes",
+    "plate_x",
+    "plate_z",
+    "sz_top",
+    "sz_bot"
 ]
 
 # Pitch types the model sees. Types are never grouped into families (a splitter and a changeup
